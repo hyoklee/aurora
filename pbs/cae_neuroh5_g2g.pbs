@@ -1,0 +1,59 @@
+#!/bin/bash
+#PBS -N cae_neuroh5_g2g
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/wrp/run/cae_neuroh5_g2g.out
+#PBS -e /home/hyoklee/wrp/run/cae_neuroh5_g2g.err
+
+set -e
+cd /home/hyoklee/wrp/run
+
+# Globus Transfer API token — must be passed via qsub -v
+if [ -z "${GLOBUS_ACCESS_TOKEN}" ]; then
+    echo "ERROR: GLOBUS_ACCESS_TOKEN is not set" >&2
+    exit 1
+fi
+
+# ALCF proxy required for Globus API calls
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+CHIMAERA=/home/hyoklee/clio-core/build_gpu/bin/chimaera
+CAE_OMNI=/home/hyoklee/clio-core/build_gpu/bin/wrp_cae_omni
+export LD_LIBRARY_PATH=/home/hyoklee/clio-core/build_gpu/bin:/home/hyoklee/miniconda3/envs/iowarp/lib:${LD_LIBRARY_PATH}
+
+run_task() {
+    local omni_file=$1
+    echo "========================================"
+    echo "[$(date)] Task: $omni_file"
+    echo "========================================"
+
+    $CHIMAERA runtime start &
+    RUNTIME_PID=$!
+    sleep 5
+
+    $CAE_OMNI "$omni_file"
+    local rc=$?
+
+    $CHIMAERA runtime stop || true
+    wait $RUNTIME_PID || true
+    sleep 2
+
+    if [ $rc -ne 0 ]; then
+        echo "[$(date)] FAILED: $omni_file (exit $rc)"
+    else
+        echo "[$(date)] OK: $omni_file"
+    fi
+    return $rc
+}
+
+run_task miv_cells_microcircuit_20220410_g2g.omni.yaml      || true
+run_task miv_cells_microcircuit_20220412_g2g.omni.yaml      || true
+run_task miv_connections_microcircuit_20220412_g2g.omni.yaml || true
+run_task pyr_forest_syns_compressed_g2g.omni.yaml           || true
+run_task dmosopt_motoneuron_g2g.omni.yaml                   || true
+
+echo "[$(date)] All 5 g2g CAE tasks complete."

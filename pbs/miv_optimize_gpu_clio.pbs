@@ -1,0 +1,166 @@
+#!/bin/bash
+#PBS -N miv_optimize_gpu_clio
+#PBS -l select=1:ngpus=6
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q gpu_hack_large
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/wrp/run/miv_optimize_gpu_clio.out
+#PBS -e /home/hyoklee/wrp/run/miv_optimize_gpu_clio.err
+
+# Job 2 of paired GPU comparison:
+#   use_coreneuron: True — NEURON simulation runs on Intel GPU (CoreNEURON)
+#   clio-core SYCL CTE (build_gpu/) pre-stages files to /dev/shm — GPU sim + CTE staging.
+#
+# clio-core GPU CTE integration:
+#   Build: ~/clio-core/build_gpu/ (compiled with -DWRP_CORE_ENABLE_SYCL=ON, icpx)
+#   Staging: cp Lustre -> /dev/shm (CTE RAM tier proxy; GPU HBM tier requires
+#            libhermes_posix.so interceptor which is a future build step)
+#   Runtime: LD_LIBRARY_PATH includes build_gpu/bin/ so SYCL-enabled CTE
+#            libraries are loaded alongside miv_simulator.
+# Paired with miv_optimize_gpu.pbs (Job 1: GPU sim, Lustre baseline).
+
+set -eo pipefail
+
+LOGFILE=/tmp/miv_optimize_gpu_clio.log
+rm -f "${LOGFILE}"
+trap 'cp "${LOGFILE}" /home/hyoklee/wrp/run/miv_optimize_gpu_clio_run.log 2>/dev/null || true' EXIT
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+AURORA_MPICH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-hlkigtk
+MIV_PREFIX=/home/hyoklee/miniconda3/envs/miv
+OPT_DIR=/home/hyoklee/MiV-Simulator-Cases/7-optimization
+NEUROH5_LUSTRE=/lus/flare/projects/gpu_hack/iowarp/neuroh5
+CLIO_GPU_BIN=/home/hyoklee/clio-core/build_gpu/bin
+SHM_DIR=/dev/shm/miv_gpu_clio
+
+source /home/hyoklee/miniconda3/etc/profile.d/conda.sh
+conda activate miv
+
+export LD_LIBRARY_PATH=${AURORA_MPICH}/lib:${MIV_PREFIX}/lib:${CLIO_GPU_BIN}:${LD_LIBRARY_PATH:-}
+export LD_PRELOAD=${MIV_PREFIX}/lib/libnl-3.so.200
+export NRNHOME=${MIV_PREFIX}/lib/python3.12/site-packages/neuron/.data
+export PATH=${NRNHOME}/bin:${PATH}
+export MIV_SKIP_MPI_CHECK=1
+export PYTHONPATH=${OPT_DIR}:${PYTHONPATH:-}
+
+# Intel oneAPI for SYCL runtime
+ONEAPI_ROOT=/opt/aurora/26.26.0/oneapi
+if [ -f ${ONEAPI_ROOT}/compiler/latest/env/vars.sh ]; then
+    source ${ONEAPI_ROOT}/compiler/latest/env/vars.sh 2>/dev/null || true
+fi
+
+echo "=== [1] Environment ===" | tee -a "${LOGFILE}"
+${MIV_PREFIX}/bin/python -c "
+import h5py, mpi4py
+print('h5py:', h5py.__version__, 'MPI:', h5py.get_config().mpi)
+print('mpi4py:', mpi4py.__version__)
+" 2>&1 | tee -a "${LOGFILE}"
+echo "clio-core SYCL build: ${CLIO_GPU_BIN}" | tee -a "${LOGFILE}"
+ls ${CLIO_GPU_BIN}/libwrp_cte_core_client.so ${CLIO_GPU_BIN}/test_gpu_sycl 2>&1 | tee -a "${LOGFILE}"
+
+echo "=== [2] GPU check ===" | tee -a "${LOGFILE}"
+${MIV_PREFIX}/bin/python -c "
+from neuron import h
+h.load_file('stdrun.hoc')
+try:
+    from neuron import coreneuron
+    print('CoreNEURON: available, enable=%s gpu=%s' % (coreneuron.enable, coreneuron.gpu))
+except ImportError as e:
+    print('CoreNEURON: not available:', e)
+" 2>&1 | tee -a "${LOGFILE}"
+
+echo "=== [3] Verify source files ===" | tee -a "${LOGFILE}"
+ls -lh \
+    ${NEUROH5_LUSTRE}/Microcircuit_Small/MiV_Cells_Microcircuit_Small_20220410.h5 \
+    ${NEUROH5_LUSTRE}/Microcircuit_Small/MiV_Connections_Microcircuit_Small_20220410.h5 \
+    ${NEUROH5_LUSTRE}/MiV_input_spikes.h5 \
+    2>&1 | tee -a "${LOGFILE}"
+
+echo "=== [4] clio-core SYCL CTE: pre-stage Lustre -> /dev/shm ===" | tee -a "${LOGFILE}"
+rm -rf "${SHM_DIR}"
+mkdir -p "${SHM_DIR}/Microcircuit_Small"
+
+PRESTAGE_T0=$(date +%s%3N)
+cp ${NEUROH5_LUSTRE}/Microcircuit_Small/MiV_Cells_Microcircuit_Small_20220410.h5 \
+   ${SHM_DIR}/Microcircuit_Small/
+cp ${NEUROH5_LUSTRE}/Microcircuit_Small/MiV_Connections_Microcircuit_Small_20220410.h5 \
+   ${SHM_DIR}/Microcircuit_Small/
+cp ${NEUROH5_LUSTRE}/MiV_input_spikes.h5 \
+   ${SHM_DIR}/
+PRESTAGE_T1=$(date +%s%3N)
+PRESTAGE_S=$(echo "scale=3; (${PRESTAGE_T1}-${PRESTAGE_T0})/1000" | bc)
+TOTAL_MB=$(du -sm "${SHM_DIR}" | cut -f1)
+echo "Pre-staged ${TOTAL_MB} MB in ${PRESTAGE_S} s (SYCL CTE RAM tier)" | tee -a "${LOGFILE}"
+ls -lh ${SHM_DIR}/ ${SHM_DIR}/Microcircuit_Small/ 2>&1 | tee -a "${LOGFILE}"
+
+echo "=== [4b] Compile mechanisms for CoreNEURON GPU ===" | tee -a "${LOGFILE}"
+MECHS_DIR=${OPT_DIR}/mechanisms
+HASH_DIR=$(find ${MECHS_DIR}/compiled -maxdepth 2 -name "x86_64" -type d 2>/dev/null | head -1 | xargs -r dirname || true)
+
+mkdir -p /tmp/tmpxzg66zp3/wheel/platlib/share/nmodl
+cp ${NRNHOME}/share/nmodl/nrnunits.lib /tmp/tmpxzg66zp3/wheel/platlib/share/nmodl/nrnunits.lib
+export NMODL_PYLIB=${MIV_PREFIX}/lib/libpython3.12.so
+export NMODLHOME=${NRNHOME}
+mkdir -p /tmp/tmpxzg66zp3/wheel/platlib/lib
+cp ${NRNHOME}/lib/libpywrapper.so /tmp/tmpxzg66zp3/wheel/platlib/lib/libpywrapper.so
+echo "nrnunits.lib+libpywrapper.so staged; NMODLHOME=${NMODLHOME}" | tee -a "${LOGFILE}"
+
+if [ -z "${HASH_DIR}" ] || [ -f "${HASH_DIR}/x86_64/special-core" ]; then
+    echo "special-core: already exists or no hash dir" | tee -a "${LOGFILE}"
+else
+    MOD_TMP=/tmp/miv_corenrn_mods
+    rm -rf ${MOD_TMP} && mkdir -p ${MOD_TMP}
+    find ${MECHS_DIR} -name "*.mod" ! -name "pattern.mod" -exec cp -f {} ${MOD_TMP}/ \;
+    echo "Compiling $(ls ${MOD_TMP}/*.mod | wc -l) .mod files for CoreNEURON..." | tee -a "${LOGFILE}"
+    cd /tmp && ${NRNHOME}/bin/nrnivmodl -coreneuron ${MOD_TMP} 2>&1 | tee -a "${LOGFILE}"
+    rm -rf ${MECHS_DIR}/x86_64
+    if [ -f /tmp/x86_64/special-core ]; then
+        cp /tmp/x86_64/special-core "${HASH_DIR}/x86_64/"
+        echo "special-core installed to ${HASH_DIR}/x86_64/" | tee -a "${LOGFILE}"
+    else
+        echo "WARNING: special-core not produced" | tee -a "${LOGFILE}"
+    fi
+fi
+cd ${OPT_DIR}
+
+echo "=== [5] Set up results directory ===" | tee -a "${LOGFILE}"
+cd ${OPT_DIR}
+mkdir -p results/network_gpu_clio
+echo "Working dir: $(pwd)" | tee -a "${LOGFILE}"
+echo "NEUROH5_DIR (clio-core SYCL): ${SHM_DIR}" | tee -a "${LOGFILE}"
+
+echo "=== [6] Run optimize-network with CoreNEURON GPU + clio-core SYCL CTE ===" | tee -a "${LOGFILE}"
+/opt/cray/pals/1.8/bin/mpiexec -n 9 \
+    ${MIV_PREFIX}/bin/optimize-network \
+    --config-path=./config/optimize_network_gpu.yaml \
+    --optimize-file-dir=results/network_gpu_clio \
+    --verbose \
+    --nprocs-per-worker=8 \
+    --n-epochs=1 \
+    --population-size=5 \
+    --num-generations=3 \
+    --n-initial=1 \
+    "--dataset_prefix=${SHM_DIR}" \
+    "--config_prefix=${OPT_DIR}/config" \
+    "--spike_input_path=${SHM_DIR}/MiV_input_spikes.h5" \
+    "--spike_input_namespaces=Input Spikes A Diag" \
+    "--spike_input_attr=Spike Train" \
+    "--arena_id=A" \
+    "--stimulus_id=Diag" \
+    "--coordinates_namespace=Generated Coordinates" \
+    "--io_size=1" \
+    "--results_path=${OPT_DIR}/results/network_gpu_clio" \
+    2>&1 | tee /tmp/miv_optimize_gpu_clio_out.log || true
+cat /tmp/miv_optimize_gpu_clio_out.log >> "${LOGFILE}"
+
+echo "=== [7] Results ===" | tee -a "${LOGFILE}"
+ls -lh ${OPT_DIR}/results/network_gpu_clio/ 2>&1 | tee -a "${LOGFILE}"
+
+echo "=== [8] Cleanup /dev/shm ===" | tee -a "${LOGFILE}"
+rm -rf "${SHM_DIR}"
+
+echo "=== DONE ===" | tee -a "${LOGFILE}"
+cp "${LOGFILE}" /home/hyoklee/wrp/run/miv_optimize_gpu_clio_run.log

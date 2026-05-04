@@ -1,0 +1,122 @@
+#!/bin/bash
+#PBS -N miv_gapjunctions
+#PBS -l select=1
+#PBS -l walltime=02:00:00
+#PBS -l filesystems=home:flare
+#PBS -q capacity
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/wrp/run/miv_gapjunctions.out
+#PBS -e /home/hyoklee/wrp/run/miv_gapjunctions.err
+
+# MiV-Simulator Case 6: Gap Junctions
+# Steps:
+#   [1] make-h5types (gap-junction variant)  — generates MiV_h5types_gj.h5
+#   [2] generate-gapjunctions                — generates MiV_gapjunctions_20230408.h5
+#   [3] run-network                          — simulates CA1 microcircuit with GJ coupling
+#
+# Network: 189 cells (80 PYR + 56 OLM + 53 PVBC), dt=0.01ms, tstop=500ms
+# (reduced from 2000ms for initial test run)
+
+set -eo pipefail
+
+LOGFILE=/tmp/miv_gapjunctions.log
+rm -f "${LOGFILE}"
+trap 'cp "${LOGFILE}" /home/hyoklee/wrp/run/miv_gapjunctions_run.log 2>/dev/null || true' EXIT
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+AURORA_MPICH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-hlkigtk
+MIV_PREFIX=/home/hyoklee/miniconda3/envs/miv
+CASE_DIR=/home/hyoklee/MiV-Simulator-Cases/6-gapjunctions
+NEUROH5_DIR=/lus/flare/projects/gpu_hack/iowarp/neuroh5
+RESULTS_DIR=${CASE_DIR}/results/runs
+
+source /home/hyoklee/miniconda3/etc/profile.d/conda.sh
+conda activate miv
+
+export LD_LIBRARY_PATH=${AURORA_MPICH}/lib:${MIV_PREFIX}/lib:${LD_LIBRARY_PATH:-}
+export LD_PRELOAD=${MIV_PREFIX}/lib/libnl-3.so.200
+export NRNHOME=${MIV_PREFIX}/lib/python3.12/site-packages/neuron/.data
+export PATH=${NRNHOME}/bin:${PATH}
+export MIV_SKIP_MPI_CHECK=1
+export PYTHONPATH=${CASE_DIR}/templates:${PYTHONPATH:-}
+
+GJ_H5TYPES=${NEUROH5_DIR}/Microcircuit_Small/MiV_h5types_gj.h5
+GJ_CONN=${NEUROH5_DIR}/Microcircuit_Small/MiV_gapjunctions_20230408.h5
+CELLS_FILE=${NEUROH5_DIR}/Microcircuit_Small/MiV_Cells_Microcircuit_Small_20220410.h5
+CONN_FILE=${NEUROH5_DIR}/Microcircuit_Small/MiV_Connections_Microcircuit_Small_20220410.h5
+SPIKE_FILE=${NEUROH5_DIR}/MiV_input_spikes.h5
+
+echo "=== [1] Environment ===" | tee -a "${LOGFILE}"
+${MIV_PREFIX}/bin/python -c "
+import h5py, mpi4py
+print('h5py:', h5py.__version__, 'MPI:', h5py.get_config().mpi)
+print('mpi4py:', mpi4py.__version__)
+" 2>&1 | tee -a "${LOGFILE}"
+
+echo "=== [2] Verify input files ===" | tee -a "${LOGFILE}"
+ls -lh "${CELLS_FILE}" "${CONN_FILE}" "${SPIKE_FILE}" 2>&1 | tee -a "${LOGFILE}"
+
+cd "${CASE_DIR}"
+mkdir -p "${RESULTS_DIR}"
+
+echo "=== [3] Generate GJ h5types ===" | tee -a "${LOGFILE}"
+if [ -f "${GJ_H5TYPES}" ]; then
+    echo "GJ h5types already exists — skipping" | tee -a "${LOGFILE}"
+else
+    echo "Generating GJ h5types..." | tee -a "${LOGFILE}"
+    ${MIV_PREFIX}/bin/make-h5types \
+        --gap-junctions \
+        -c Microcircuit_Small.yaml \
+        --config-prefix config \
+        --output-path "${GJ_H5TYPES}" \
+        2>&1 | tee -a "${LOGFILE}"
+    echo "GJ h5types created: ${GJ_H5TYPES}" | tee -a "${LOGFILE}"
+fi
+
+echo "=== [4] Generate gap junction connectivity ===" | tee -a "${LOGFILE}"
+if [ -f "${GJ_CONN}" ]; then
+    echo "GJ connectivity already exists — skipping" | tee -a "${LOGFILE}"
+    ls -lh "${GJ_CONN}" | tee -a "${LOGFILE}"
+else
+    echo "Generating gap junction connectivity..." | tee -a "${LOGFILE}"
+    # Use -n 1: 189 cells need no parallelism; avoids mpi4py/neuroh5 binary incompatibility segfault
+    /opt/cray/pals/1.8/bin/mpiexec -n 1 \
+        ${MIV_PREFIX}/bin/generate-gapjunctions \
+        --config=./config/Microcircuit_Small.yaml \
+        --types-path="${GJ_H5TYPES}" \
+        --forest-path="${CELLS_FILE}" \
+        --connectivity-path="${GJ_CONN}" \
+        --connectivity-namespace="Gap Junctions" \
+        --coords-path="${CELLS_FILE}" \
+        --coords-namespace="Generated Coordinates" \
+        --io-size=1 -v \
+        2>&1 | tee -a "${LOGFILE}"
+    ls -lh "${GJ_CONN}" | tee -a "${LOGFILE}"
+fi
+
+echo "=== [5] Run Case 6: Gap Junction network simulation ===" | tee -a "${LOGFILE}"
+echo "dt=0.01ms, tstop=500ms, 8 MPI ranks" | tee -a "${LOGFILE}"
+# Use minimal flags matching the original run_microcircuit.sh to avoid config conflicts
+/opt/cray/pals/1.8/bin/mpiexec -n 8 \
+    ${MIV_PREFIX}/bin/run-network \
+    --verbose \
+    --arena-id A \
+    --stimulus-id Diag \
+    --config-file=Microcircuit_Small.yaml \
+    --template-paths=./templates \
+    --dt=0.01 \
+    --tstop=500 \
+    --dataset-prefix="${NEUROH5_DIR}" \
+    --config-prefix=./config \
+    --results-path="${RESULTS_DIR}" \
+    --io-size=1 \
+    2>&1 | tee /tmp/miv_gapjunctions_sim.log || true
+cat /tmp/miv_gapjunctions_sim.log >> "${LOGFILE}"
+
+echo "=== [6] Results ===" | tee -a "${LOGFILE}"
+ls -lh "${RESULTS_DIR}"/ 2>&1 | tee -a "${LOGFILE}"
+
+echo "=== DONE ===" | tee -a "${LOGFILE}"
+cp "${LOGFILE}" /home/hyoklee/wrp/run/miv_gapjunctions_run.log

@@ -1,0 +1,94 @@
+#!/bin/bash
+#PBS -N miv_optimize_test
+#PBS -l select=1
+#PBS -l walltime=06:00:00
+#PBS -l filesystems=home:flare
+#PBS -q capacity
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/wrp/run/miv_optimize_test.out
+#PBS -e /home/hyoklee/wrp/run/miv_optimize_test.err
+
+set -eo pipefail
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+LOGFILE=/tmp/miv_optimize_test.log
+rm -f ${LOGFILE}
+trap 'cp ${LOGFILE} /home/hyoklee/wrp/run/miv_optimize_test_run.log 2>/dev/null || true' EXIT
+
+AURORA_MPICH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-hlkigtk
+MIV_PREFIX=/home/hyoklee/miniconda3/envs/miv
+OPT_DIR=/home/hyoklee/MiV-Simulator-Cases/7-optimization
+NEUROH5_DIR=/lus/flare/projects/gpu_hack/iowarp/neuroh5
+
+source /home/hyoklee/miniconda3/etc/profile.d/conda.sh
+conda activate miv
+
+# Aurora MPICH must precede conda OpenMPI in LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=${AURORA_MPICH}/lib:${MIV_PREFIX}/lib:${LD_LIBRARY_PATH:-}
+echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" | tee -a ${LOGFILE}
+
+# Cray libfabric loads system /usr/lib64/libnl-3.so.200 (v25.0) before h5py's OpenMPI
+# can load conda's libnl-3.so.200 (v26.0 with libnl_3_5). LD_PRELOAD forces the
+# conda version into the linker cache first so h5py imports correctly.
+export LD_PRELOAD=${MIV_PREFIX}/lib/libnl-3.so.200
+
+# NEURON 9.x pip wheel: NRNHOME overrides stale build-time temp path
+export NRNHOME=${MIV_PREFIX}/lib/python3.12/site-packages/neuron/.data
+export PATH=${NRNHOME}/bin:${PATH}
+
+# Skip PR 103 MPI environment check (h5py import order handled by utils/__init__.py fix)
+export MIV_SKIP_MPI_CHECK=1
+
+# Worker ranks launched by Cray PALS mpiexec don't inherit cwd in sys.path.
+# PYTHONPATH ensures all ranks can find the 7-optimization/templates/ package.
+export PYTHONPATH=${OPT_DIR}:${PYTHONPATH:-}
+
+echo "=== [1] Environment ===" | tee -a ${LOGFILE}
+${MIV_PREFIX}/bin/python -c "
+import h5py, mpi4py
+print('h5py:', h5py.__version__, 'MPI:', h5py.get_config().mpi)
+print('mpi4py:', mpi4py.__version__)
+" 2>&1 | tee -a ${LOGFILE}
+
+echo "=== [2] Verify data files ===" | tee -a ${LOGFILE}
+ls -lh ${NEUROH5_DIR}/Microcircuit_Small/MiV_Cells_Microcircuit_Small_20220410.h5 2>&1 | tee -a ${LOGFILE}
+ls -lh ${NEUROH5_DIR}/Microcircuit_Small/MiV_Connections_Microcircuit_Small_20220410.h5 2>&1 | tee -a ${LOGFILE}
+ls -lh ${NEUROH5_DIR}/MiV_input_spikes.h5 2>&1 | tee -a ${LOGFILE}
+
+echo "=== [3] Set up results directory ===" | tee -a ${LOGFILE}
+cd ${OPT_DIR}
+mkdir -p results/network
+echo "Working dir: $(pwd)" | tee -a ${LOGFILE}
+
+echo "=== [4] Run optimize-network (small test: pop=5, gen=3, epochs=1) ===" | tee -a ${LOGFILE}
+# 9 processes: 1 dmosopt controller + 1 worker of 8 ranks
+# Use Cray PALS mpiexec (integrates with PBS allocation; OpenMPI PRRTE fails with "not enough slots")
+# h5py-first fix (utils/__init__.py) prevents HDF5 corruption under Cray PALS mpiexec
+/opt/cray/pals/1.8/bin/mpiexec -n 9 \
+    ${MIV_PREFIX}/bin/optimize-network \
+    --config-path=./config/optimize_network.yaml \
+    --optimize-file-dir=results/network \
+    --verbose \
+    --nprocs-per-worker=8 \
+    --n-epochs=1 \
+    --population-size=5 \
+    --num-generations=3 \
+    "--dataset_prefix=${NEUROH5_DIR}" \
+    "--config_prefix=${OPT_DIR}/config" \
+    "--spike_input_path=${NEUROH5_DIR}/MiV_input_spikes.h5" \
+    "--spike_input_namespaces=Input Spikes A Diag" \
+    "--spike_input_attr=Spike Train" \
+    "--arena_id=A" \
+    "--stimulus_id=Diag" \
+    "--coordinates_namespace=Generated Coordinates" \
+    "--io_size=1" \
+    "--results_path=${OPT_DIR}/results/network" \
+    2>&1 | tee /tmp/miv_optimize_out.log || true
+cat /tmp/miv_optimize_out.log >> ${LOGFILE}
+
+echo "=== [5] Results ===" | tee -a ${LOGFILE}
+ls -lh ${OPT_DIR}/results/network/ 2>&1 | tee -a ${LOGFILE}
+
+echo "=== DONE ===" | tee -a ${LOGFILE}
+cp ${LOGFILE} /home/hyoklee/wrp/run/miv_optimize_test_run.log

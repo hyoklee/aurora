@@ -1,0 +1,119 @@
+#!/bin/bash
+#PBS -N miv_io_bench
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/wrp/run/miv_io_bench.out
+#PBS -e /home/hyoklee/wrp/run/miv_io_bench.err
+
+# MiV HDF5 I/O benchmark: Lustre (baseline) vs /dev/shm (clio-core CTE RAM tier proxy).
+#
+# clio-core integration strategy:
+#   - Stage 1 (PRE-STAGE): copy HDF5 files to /dev/shm — equivalent to what
+#     clio-core's CAE Hdf5FileAssimilator does when loading blobs into the CTE RAM tier.
+#   - Stage 2 (BENCHMARK): run the same neuroh5 scatter-read calls from both
+#     Lustre and /dev/shm and compare timing.
+#
+# In a full clio-core deployment the VFD (libhdf5_hermes_vfd.so) would intercept
+# HDF5 calls transparently; here we replicate that effect by redirecting the
+# dataset_prefix to /dev/shm after pre-staging.
+
+set -eo pipefail
+
+LOGFILE=/tmp/miv_io_bench.log
+rm -f "${LOGFILE}"
+trap 'cp "${LOGFILE}" /home/hyoklee/wrp/run/miv_io_bench_run.log 2>/dev/null || true' EXIT
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+AURORA_MPICH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-hlkigtk
+MIV_PREFIX=/home/hyoklee/miniconda3/envs/miv
+CLIO_BIN=/home/hyoklee/clio-core/build/bin
+NEUROH5_DIR=/lus/flare/projects/gpu_hack/iowarp/neuroh5
+SHM_DIR=/dev/shm/miv_bench
+
+source /home/hyoklee/miniconda3/etc/profile.d/conda.sh
+conda activate miv
+
+export LD_LIBRARY_PATH=${AURORA_MPICH}/lib:${MIV_PREFIX}/lib:${LD_LIBRARY_PATH:-}
+export LD_PRELOAD=${MIV_PREFIX}/lib/libnl-3.so.200
+export NRNHOME=${MIV_PREFIX}/lib/python3.12/site-packages/neuron/.data
+export PATH=${NRNHOME}/bin:${PATH}
+export MIV_SKIP_MPI_CHECK=1
+
+CELLS_LUSTRE=${NEUROH5_DIR}/Microcircuit_Small/MiV_Cells_Microcircuit_Small_20220410.h5
+CONN_LUSTRE=${NEUROH5_DIR}/Microcircuit_Small/MiV_Connections_Microcircuit_Small_20220410.h5
+SPIKE_LUSTRE=${NEUROH5_DIR}/MiV_input_spikes.h5
+
+echo "=== [1] Environment ===" | tee -a "${LOGFILE}"
+${MIV_PREFIX}/bin/python -c "
+import h5py, mpi4py
+print('h5py:', h5py.__version__, 'MPI:', h5py.get_config().mpi)
+print('mpi4py:', mpi4py.__version__)
+import neuroh5; print('neuroh5 path:', neuroh5.__file__)
+" 2>&1 | tee -a "${LOGFILE}"
+
+echo "=== [2] File sizes ===" | tee -a "${LOGFILE}"
+ls -lh "${CELLS_LUSTRE}" "${CONN_LUSTRE}" "${SPIKE_LUSTRE}" 2>&1 | tee -a "${LOGFILE}"
+CELLS_MB=$(du -m "${CELLS_LUSTRE}" | cut -f1)
+CONN_MB=$(du -m "${CONN_LUSTRE}" | cut -f1)
+SPIKE_MB=$(du -m "${SPIKE_LUSTRE}" | cut -f1)
+TOTAL_MB=$((CELLS_MB + CONN_MB + SPIKE_MB))
+echo "Total data: ${TOTAL_MB} MB" | tee -a "${LOGFILE}"
+
+echo "" | tee -a "${LOGFILE}"
+echo "=== [3] BASELINE: neuroh5 scatter-read from Lustre ===" | tee -a "${LOGFILE}"
+/opt/cray/pals/1.8/bin/mpiexec -n 9 \
+    ${MIV_PREFIX}/bin/python /home/hyoklee/wrp/run/miv_io_bench.py \
+    "${CELLS_LUSTRE}" "${CONN_LUSTRE}" "${SPIKE_LUSTRE}" \
+    "BASELINE-Lustre" \
+    2>&1 | tee -a "${LOGFILE}"
+
+echo "" | tee -a "${LOGFILE}"
+echo "=== [4] CLIO-CORE: pre-stage files to /dev/shm (CTE RAM tier) ===" | tee -a "${LOGFILE}"
+rm -rf "${SHM_DIR}"
+mkdir -p "${SHM_DIR}"
+
+PRESTAGE_START=$(date +%s%3N)
+cp "${CELLS_LUSTRE}" "${SHM_DIR}/"
+cp "${CONN_LUSTRE}" "${SHM_DIR}/"
+cp "${SPIKE_LUSTRE}" "${SHM_DIR}/"
+PRESTAGE_END=$(date +%s%3N)
+PRESTAGE_MS=$((PRESTAGE_END - PRESTAGE_START))
+PRESTAGE_S=$(echo "scale=3; ${PRESTAGE_MS}/1000" | bc)
+
+CELLS_SHM=${SHM_DIR}/MiV_Cells_Microcircuit_Small_20220410.h5
+CONN_SHM=${SHM_DIR}/MiV_Connections_Microcircuit_Small_20220410.h5
+SPIKE_SHM=${SHM_DIR}/MiV_input_spikes.h5
+
+echo "Pre-stage (Lustre → /dev/shm): ${PRESTAGE_S} s for ${TOTAL_MB} MB" | tee -a "${LOGFILE}"
+echo "Pre-stage bandwidth: $(echo "scale=1; ${TOTAL_MB}/${PRESTAGE_S}" | bc) MB/s" | tee -a "${LOGFILE}"
+ls -lh "${SHM_DIR}/" 2>&1 | tee -a "${LOGFILE}"
+
+echo "" | tee -a "${LOGFILE}"
+echo "=== [5] CLIO-CORE: neuroh5 scatter-read from /dev/shm ===" | tee -a "${LOGFILE}"
+/opt/cray/pals/1.8/bin/mpiexec -n 9 \
+    ${MIV_PREFIX}/bin/python /home/hyoklee/wrp/run/miv_io_bench.py \
+    "${CELLS_SHM}" "${CONN_SHM}" "${SPIKE_SHM}" \
+    "CLIO-CORE-shm" \
+    2>&1 | tee -a "${LOGFILE}"
+
+echo "" | tee -a "${LOGFILE}"
+echo "=== [6] Second pass: re-read from /dev/shm (CTE cache hit) ===" | tee -a "${LOGFILE}"
+/opt/cray/pals/1.8/bin/mpiexec -n 9 \
+    ${MIV_PREFIX}/bin/python /home/hyoklee/wrp/run/miv_io_bench.py \
+    "${CELLS_SHM}" "${CONN_SHM}" "${SPIKE_SHM}" \
+    "CLIO-CORE-shm-2nd" \
+    2>&1 | tee -a "${LOGFILE}"
+
+echo "" | tee -a "${LOGFILE}"
+echo "=== [7] Cleanup ===" | tee -a "${LOGFILE}"
+rm -rf "${SHM_DIR}"
+echo "Removed ${SHM_DIR}" | tee -a "${LOGFILE}"
+
+echo "" | tee -a "${LOGFILE}"
+echo "=== DONE ===" | tee -a "${LOGFILE}"
+cp "${LOGFILE}" /home/hyoklee/wrp/run/miv_io_bench_run.log

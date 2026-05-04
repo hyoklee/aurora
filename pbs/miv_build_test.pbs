@@ -1,0 +1,185 @@
+#!/bin/bash
+#PBS -N miv_build_test
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/wrp/run/miv_build_test.out
+#PBS -e /home/hyoklee/wrp/run/miv_build_test.err
+
+set -eo pipefail
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+rm -f /tmp/miv_build_test.log
+# PR 103 (GazzolaLab/MiV-Simulator) merged into ~/MiV-Simulator main branch
+echo "MiV-Simulator git HEAD: $(git -C /home/hyoklee/MiV-Simulator log --oneline -1)" >> /tmp/miv_build_test.log 2>&1 || true
+# Always copy log on exit so results are preserved even on early failure
+trap 'cp /tmp/miv_build_test.log /home/hyoklee/wrp/run/miv_build_test_run.log 2>/dev/null || true' EXIT
+
+CONDA=/home/hyoklee/miniconda3/bin/conda
+MIV_DIR=/home/hyoklee/MiV-Simulator
+NEUROH5_DIR=/lus/flare/projects/gpu_hack/iowarp/neuroh5
+# Parallel HDF5 1.14.6 built against Aurora MPICH (has H5Pset_dxpl_mpio)
+HDF5_PREFIX=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/hdf5-1.14.6-ehlefog
+AURORA_MPICH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-hlkigtk
+MIV_PREFIX=/home/hyoklee/miniconda3/envs/miv
+PIP=${MIV_PREFIX}/bin/pip
+PYTHON=${MIV_PREFIX}/bin/python
+PYTEST=${MIV_PREFIX}/bin/pytest
+
+# Activate miv conda env to set PATH and LD_LIBRARY_PATH correctly
+source /home/hyoklee/miniconda3/etc/profile.d/conda.sh
+conda activate miv
+# Aurora MPICH must come before conda env (which has OpenMPI libmpi.so.40)
+# mpi4py was compiled against Aurora MPICH; loading OpenMPI first causes ABI crash
+export LD_LIBRARY_PATH=${AURORA_MPICH}/lib:${MIV_PREFIX}/lib:${LD_LIBRARY_PATH:-}
+echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" | tee -a /tmp/miv_build_test.log
+
+echo "=== [1] Ensure miv conda env (Python 3.12) ===" | tee -a /tmp/miv_build_test.log
+if [ ! -d ${MIV_PREFIX} ]; then
+    $CONDA create -n miv python=3.12 -y 2>&1 | tee -a /tmp/miv_build_test.log
+else
+    echo "miv env exists" | tee -a /tmp/miv_build_test.log
+fi
+
+echo "=== [2] Install Python deps ===" | tee -a /tmp/miv_build_test.log
+$PIP install hatchling cmake ninja editables pytest 2>&1 | tee -a /tmp/miv_build_test.log
+$PIP install "numpy<2.0" scipy matplotlib networkx pyyaml pydantic quantities click h5py 2>&1 | tee -a /tmp/miv_build_test.log
+$PIP install neuron 2>&1 | tee -a /tmp/miv_build_test.log
+
+echo "=== [2b] Build mpi4py against Aurora MPICH; keep serial h5py ===" | tee -a /tmp/miv_build_test.log
+# mpi4py: build from source against Aurora MPICH for correct ABI
+$CONDA remove -n miv mpi4py --force -y 2>/dev/null || true
+MPICC="${AURORA_MPICH}/bin/mpicc" \
+LDFLAGS="-Wl,-rpath,${AURORA_MPICH}/lib -Wl,-rpath,${MIV_PREFIX}/lib" \
+$PIP install mpi4py --no-binary mpi4py 2>&1 | tee -a /tmp/miv_build_test.log
+$PYTHON -c "import mpi4py; print('mpi4py OK:', mpi4py.__version__, 'include:', mpi4py.get_include())" 2>&1 | tee -a /tmp/miv_build_test.log
+
+# h5py: keep serial PyPI wheel — parallel h5py (HDF5_MPI=ON) fails to import
+# under Cray PALS mpiexec on Aurora (ValueError: Not a datatype in H5Tlock).
+# MIV_SKIP_MPI_CHECK=1 bypasses PR 103's parallel-h5py requirement at test time.
+$PYTHON -c "import h5py; print('h5py OK:', h5py.__version__, 'MPI:', h5py.get_config().mpi)" 2>&1 | tee -a /tmp/miv_build_test.log
+# Re-pin numpy<2.0
+$PIP install "numpy<2.0" --quiet 2>&1 | tee -a /tmp/miv_build_test.log
+
+echo "=== [3] Manual neuroh5 cmake build (bypasses pip cmake arg problem) ===" | tee -a /tmp/miv_build_test.log
+NEUROH5_SRC=/home/hyoklee/neuroh5
+git -C ${NEUROH5_SRC} pull 2>&1 | tee -a /tmp/miv_build_test.log || echo "git pull failed (network?), continuing with existing source" | tee -a /tmp/miv_build_test.log
+
+# Show cmake mpi4py/HDF5 variable names so we can pass correct -D flags
+echo "--- neuroh5 CMakeLists.txt mpi4py lines ---" | tee -a /tmp/miv_build_test.log
+grep -n "mpi4py\|MPI4PY\|find_package.*HDF5\|HDF5_ROOT\|INCLUDE_DIR" ${NEUROH5_SRC}/CMakeLists.txt 2>&1 | tee -a /tmp/miv_build_test.log || true
+
+MPI4PY_INC=${MIV_PREFIX}/lib/python3.12/site-packages/mpi4py/include
+
+rm -rf ${NEUROH5_SRC}/build
+mkdir -p ${NEUROH5_SRC}/build
+cd ${NEUROH5_SRC}/build
+
+HDF5_ROOT=${HDF5_PREFIX} \
+cmake ${NEUROH5_SRC} \
+  -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+  -DHDF5_ROOT=${HDF5_PREFIX} \
+  -DHDF5_INCLUDE_DIRS=${HDF5_PREFIX}/include \
+  -DHDF5_LIBRARIES="${HDF5_PREFIX}/lib/libhdf5.so;${HDF5_PREFIX}/lib/libhdf5_hl.so;${AURORA_MPICH}/lib/libmpi.so" \
+  -DMPI_C_COMPILER=${AURORA_MPICH}/bin/mpicc \
+  -DMPI_CXX_COMPILER=${AURORA_MPICH}/bin/mpicxx \
+  -DPYTHON_EXECUTABLE=${PYTHON} \
+  -DMPI4PY_INCLUDE_DIR=${MPI4PY_INC} \
+  -DCMAKE_INSTALL_PREFIX=${MIV_PREFIX} \
+  2>&1 | tee -a /tmp/miv_build_test.log
+
+make -j8 2>&1 | tee -a /tmp/miv_build_test.log
+# Build the Python extension explicitly (cmake has no install target)
+make python_neuroh5_io 2>&1 | tee -a /tmp/miv_build_test.log || \
+    echo "python_neuroh5_io target may already be built" | tee -a /tmp/miv_build_test.log
+
+# Install neuroh5 Python package to miv site-packages
+NEUROH5_PYSITE=${MIV_PREFIX}/lib/python3.12/site-packages/neuroh5
+mkdir -p ${NEUROH5_PYSITE}
+# Copy pure Python files
+cp -r ${NEUROH5_SRC}/python/neuroh5/. ${NEUROH5_PYSITE}/
+echo "Copied neuroh5 Python files to site-packages" | tee -a /tmp/miv_build_test.log
+# Copy compiled Python extension (io.so built into build/lib/)
+if [ -f ${NEUROH5_SRC}/build/lib/io.so ]; then
+    cp ${NEUROH5_SRC}/build/lib/io.so ${NEUROH5_PYSITE}/io.so
+    echo "Copied io.so to site-packages" | tee -a /tmp/miv_build_test.log
+else
+    echo "WARNING: build/lib/io.so not found" | tee -a /tmp/miv_build_test.log
+    ls ${NEUROH5_SRC}/build/lib/ 2>&1 | tee -a /tmp/miv_build_test.log
+fi
+$PYTHON -c "import neuroh5; print('neuroh5 imported OK')" 2>&1 | tee -a /tmp/miv_build_test.log || \
+  echo "neuroh5 import failed" | tee -a /tmp/miv_build_test.log
+
+echo "=== [4] Install remaining MiV git deps and MiV itself ===" | tee -a /tmp/miv_build_test.log
+$PIP install "git+https://github.com/iraikov/neural_spike_encoding.git" 2>&1 | tee -a /tmp/miv_build_test.log
+$PIP install "git+https://github.com/treverhines/RBF" 2>&1 | tee -a /tmp/miv_build_test.log
+$PIP install machinable 2>&1 | tee -a /tmp/miv_build_test.log
+$PIP install "${MIV_DIR}" --no-deps --force-reinstall --no-cache-dir 2>&1 | tee -a /tmp/miv_build_test.log
+echo "MiV install exit code: $?" | tee -a /tmp/miv_build_test.log
+
+echo "=== [5] Compile NEURON mechanisms ===" | tee -a /tmp/miv_build_test.log
+cd "${MIV_DIR}/tests/mechanisms"
+NRNIVMODL=${MIV_PREFIX}/lib/python3.12/site-packages/neuron/.data/bin/nrnivmodl
+# NEURON 9.x pip wheel hardcodes the build temp path; NRNHOME overrides it
+export NRNHOME=${MIV_PREFIX}/lib/python3.12/site-packages/neuron/.data
+if [ -f "${NRNIVMODL}" ]; then
+    echo "Using nrnivmodl: ${NRNIVMODL}, NRNHOME: ${NRNHOME}" | tee -a /tmp/miv_build_test.log
+    "${NRNIVMODL}" . 2>&1 | tee -a /tmp/miv_build_test.log || \
+        echo "WARNING: nrnivmodl failed" | tee -a /tmp/miv_build_test.log
+else
+    echo "WARNING: nrnivmodl not found at ${NRNIVMODL}" | tee -a /tmp/miv_build_test.log
+fi
+cd "${MIV_DIR}"
+
+export MIV_SKIP_MPI_CHECK=1
+
+echo "=== [6] Run pure-Python tests ===" | tee -a /tmp/miv_build_test.log
+$PYTEST tests/test_coding.py tests/test_connections.py tests/test_input_features.py \
+    tests/test_eval_network.py -v 2>&1 | tee /tmp/miv_pure_tests.log || true
+cat /tmp/miv_pure_tests.log >> /tmp/miv_build_test.log
+
+echo "=== [7] Run generate-spike-trains test ===" | tee -a /tmp/miv_build_test.log
+$PYTEST tests/test_generate_spike_trains.py -v 2>&1 | tee /tmp/miv_spike_tests.log || true
+cat /tmp/miv_spike_tests.log >> /tmp/miv_build_test.log
+
+echo "=== [8] Run NEURON-dependent tests ===" | tee -a /tmp/miv_build_test.log
+$PYTEST tests/test_synapses.py tests/test_distribute_synapses.py \
+    tests/mechanisms/ -v 2>&1 | tee /tmp/miv_neuron_tests.log || true
+cat /tmp/miv_neuron_tests.log >> /tmp/miv_build_test.log
+
+echo "=== [9] MiV CLI: show-h5types ===" | tee -a /tmp/miv_build_test.log
+SHOW_H5TYPES=${MIV_PREFIX}/bin/show-h5types
+if [ -f "${SHOW_H5TYPES}" ]; then
+    mpiexec -n 1 "${SHOW_H5TYPES}" --input-path "${NEUROH5_DIR}/MiV_h5types.h5" 2>&1 \
+        | tee /tmp/miv_show_h5types.log || true
+    cat /tmp/miv_show_h5types.log >> /tmp/miv_build_test.log
+else
+    echo "show-h5types not found" | tee -a /tmp/miv_build_test.log
+fi
+
+echo "=== [10] MiV CLI: query-cell-attrs ===" | tee -a /tmp/miv_build_test.log
+QUERY_ATTRS=${MIV_PREFIX}/bin/query-cell-attrs
+if [ -f "${QUERY_ATTRS}" ]; then
+    mpiexec -n 1 "${QUERY_ATTRS}" --populations OLM \
+        --input-path "${NEUROH5_DIR}/Microcircuit_Small/MiV_Cells_Microcircuit_Small_20220410.h5" 2>&1 \
+        | tee /tmp/miv_query_attrs.log || true
+    cat /tmp/miv_query_attrs.log >> /tmp/miv_build_test.log
+fi
+
+echo "=== [11] CoreNEURON GPU check ===" | tee -a /tmp/miv_build_test.log
+$PYTHON -c "
+from neuron import coreneuron
+print('CoreNEURON:', coreneuron)
+print('GPU attr present:', hasattr(coreneuron, 'gpu'))
+try:
+    coreneuron.enable = True
+    coreneuron.gpu = True
+    print('GPU mode set OK')
+except Exception as e:
+    print('GPU mode error:', e)
+" 2>&1 | tee -a /tmp/miv_build_test.log || true
+
+echo "=== DONE ===" | tee -a /tmp/miv_build_test.log
+cp /tmp/miv_build_test.log /home/hyoklee/wrp/run/miv_build_test_run.log

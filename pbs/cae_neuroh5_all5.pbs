@@ -1,0 +1,58 @@
+#!/bin/bash
+#PBS -N cae_neuroh5_all5
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/wrp/run/cae_neuroh5_all5.out
+#PBS -e /home/hyoklee/wrp/run/cae_neuroh5_all5.err
+
+set -e
+cd /home/hyoklee/wrp/run
+
+# Globus token — passed in via qsub -v or pre-set in environment
+if [ -z "${GLOBUS_ACCESS_TOKEN}" ]; then
+    echo "ERROR: GLOBUS_ACCESS_TOKEN is not set" >&2
+    exit 1
+fi
+
+# ALCF proxy required for Globus HTTPS downloads
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+CHIMAERA=/home/hyoklee/clio-core/build_gpu/bin/chimaera
+CAE_OMNI=/home/hyoklee/clio-core/build_gpu/bin/wrp_cae_omni
+
+run_task() {
+    local omni_file=$1
+    echo "========================================"
+    echo "[$(date)] Task: $omni_file"
+    echo "========================================"
+
+    $CHIMAERA runtime start &
+    RUNTIME_PID=$!
+    sleep 5
+
+    $CAE_OMNI "$omni_file"
+    local rc=$?
+
+    $CHIMAERA runtime stop || true
+    wait $RUNTIME_PID || true
+    sleep 2
+
+    if [ $rc -ne 0 ]; then
+        echo "[$(date)] FAILED: $omni_file (exit $rc)"
+    else
+        echo "[$(date)] OK: $omni_file"
+    fi
+    return $rc
+}
+
+run_task miv_cells_microcircuit_20220410.omni.yaml      || true
+run_task miv_cells_microcircuit_20220412.omni.yaml      || true
+run_task miv_connections_microcircuit_20220412.omni.yaml || true
+run_task pyr_forest_syns_compressed.omni.yaml           || true
+run_task dmosopt_motoneuron.omni.yaml                   || true
+
+echo "[$(date)] All 5 CAE tasks complete."

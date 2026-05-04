@@ -1,0 +1,28 @@
+#!/bin/bash
+#PBS -N cae_miv_conn_20220412
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/wrp/run/cae_miv_connections_20220412.out
+#PBS -e /home/hyoklee/wrp/run/cae_miv_connections_20220412.err
+
+set -e
+cd /home/hyoklee/wrp/run
+
+CHIMAERA=/home/hyoklee/miniconda3/envs/iowarp/bin/chimaera
+CAE_OMNI=/home/hyoklee/miniconda3/envs/iowarp/bin/wrp_cae_omni
+
+echo "[$(date)] Starting Chimaera runtime"
+$CHIMAERA runtime start &
+RUNTIME_PID=$!
+sleep 5
+
+echo "[$(date)] Running CAE OMNI task"
+$CAE_OMNI miv_connections_microcircuit_20220412.omni.yaml
+
+echo "[$(date)] Stopping Chimaera runtime"
+$CHIMAERA runtime stop || true
+wait $RUNTIME_PID || true
+echo "[$(date)] Done"

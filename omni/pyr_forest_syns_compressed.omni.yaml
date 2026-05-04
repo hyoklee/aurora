@@ -1,0 +1,12 @@
+name: pyr_forest_syns_compressed
+
+# Source: MiV guest collection (Globus endpoint 0028aea1-ffc7-44b6-aec9-dd748ac839c4)
+# Destination: Aurora Flare shared filesystem
+
+version: "1.0"
+
+transfers:
+  - src: "globus://0028aea1-ffc7-44b6-aec9-dd748ac839c4/PYR_forest_syns_compressed.h5"
+    dst: "file::/lus/flare/projects/gpu_hack/iowarp/neuroh5/PYR_forest_syns_compressed.h5"
+    format: "binary"
+    src_token: "${GLOBUS_ACCESS_TOKEN}"

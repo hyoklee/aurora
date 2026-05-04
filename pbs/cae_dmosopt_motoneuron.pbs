@@ -1,0 +1,28 @@
+#!/bin/bash
+#PBS -N cae_dmosopt_motoneuron
+#PBS -l select=1
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/wrp/run/cae_dmosopt_motoneuron.out
+#PBS -e /home/hyoklee/wrp/run/cae_dmosopt_motoneuron.err
+
+set -e
+cd /home/hyoklee/wrp/run
+
+CHIMAERA=/home/hyoklee/miniconda3/envs/iowarp/bin/chimaera
+CAE_OMNI=/home/hyoklee/miniconda3/envs/iowarp/bin/wrp_cae_omni
+
+echo "[$(date)] Starting Chimaera runtime"
+$CHIMAERA runtime start &
+RUNTIME_PID=$!
+sleep 5
+
+echo "[$(date)] Running CAE OMNI task"
+$CAE_OMNI dmosopt_motoneuron.omni.yaml
+
+echo "[$(date)] Stopping Chimaera runtime"
+$CHIMAERA runtime stop || true
+wait $RUNTIME_PID || true
+echo "[$(date)] Done"
