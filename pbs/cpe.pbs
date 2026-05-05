@@ -1,0 +1,12 @@
+#!/bin/bash
+#PBS -N cpe
+#PBS -l select=1
+#PBS -l walltime=00:10:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/aurora/cpe.out
+#PBS -e /home/hyoklee/aurora/cpe.err
+
+set -eo pipefail
+/home/hyoklee/aurora/src/cpe
