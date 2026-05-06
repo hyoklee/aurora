@@ -1,0 +1,207 @@
+#!/bin/bash
+#PBS -N llm_aurora_test
+#PBS -l select=1:ngpus=6
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A gpu_hack
+#PBS -o /home/hyoklee/bin/llm_aurora_test.out
+#PBS -e /home/hyoklee/bin/llm_aurora_test.err
+
+# Download grc-iit/llama31-8b-aurora-chat-v3-gguf from HuggingFace
+# and run a simple prompt test using ipex-llm on Intel XPU (Aurora GPU).
+#
+# Model: llama_A-f16.gguf  (FP16 GGUF, Aurora-optimized Llama 3.1 8B Chat)
+# Tokenizer: NousResearch/Meta-Llama-3.1-8B-Instruct (public mirror, no auth)
+# Inference: ipex_llm.transformers.AutoModelForCausalLM on XPU
+
+set -eo pipefail
+# module load py-torch
+LOGFILE=/tmp/llm_aurora_test.log
+rm -f "${LOGFILE}"
+trap 'cp "${LOGFILE}" /home/hyoklee/bin/llm_aurora_test_run.log 2>/dev/null || true' EXIT
+
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+IPEX_LLM_ENV=/home/hyoklee/miniconda3/envs/ipex-llm
+MODEL_DIR=/lus/flare/projects/gpu_hack/iowarp/llm_models/llama31-8b-aurora-chat
+
+source /home/hyoklee/miniconda3/etc/profile.d/conda.sh
+conda activate ipex-llm
+# conda install huggingface_hub
+# conda install transformers
+# conda install ggpuf
+# conda install accelerate
+
+# Intel oneAPI environment for XPU
+ONEAPI_ROOT=/opt/aurora/26.26.0/oneapi
+if [ -f ${ONEAPI_ROOT}/compiler/latest/env/vars.sh ]; then
+    source ${ONEAPI_ROOT}/compiler/latest/env/vars.sh 2>/dev/null || true
+fi
+if [ -f ${ONEAPI_ROOT}/mkl/latest/env/vars.sh ]; then
+    source ${ONEAPI_ROOT}/mkl/latest/env/vars.sh 2>/dev/null || true
+fi
+
+echo "=== [1] Environment ===" | tee -a "${LOGFILE}"
+${IPEX_LLM_ENV}/bin/python -c "
+import torch
+import intel_extension_for_pytorch as ipex
+print('torch:', torch.__version__)
+print('ipex:', ipex.__version__)
+print('XPU available:', torch.xpu.is_available())
+if torch.xpu.is_available():
+    print('XPU device count:', torch.xpu.device_count())
+    for i in range(torch.xpu.device_count()):
+        print(f'  XPU {i}:', torch.xpu.get_device_name(i))
+" 2>&1 | tee -a "${LOGFILE}"
+
+echo "" | tee -a "${LOGFILE}"
+echo "=== [2] Download model GGUF ===" | tee -a "${LOGFILE}"
+mkdir -p "${MODEL_DIR}"
+${IPEX_LLM_ENV}/bin/python - <<'PYEOF' 2>&1 | tee -a "${LOGFILE}"
+import os
+from huggingface_hub import hf_hub_download
+
+model_dir = os.environ.get('MODEL_DIR', '/lus/flare/projects/gpu_hack/iowarp/llm_models/llama31-8b-aurora-chat')
+gguf_path = os.path.join(model_dir, 'llama_A-f16.gguf')
+
+if os.path.exists(gguf_path):
+    size_gb = os.path.getsize(gguf_path) / 1e9
+    print(f"GGUF already exists: {gguf_path} ({size_gb:.1f} GB) — skipping download")
+else:
+    print("Downloading llama_A-f16.gguf from grc-iit/llama31-8b-aurora-chat-v3-gguf ...")
+    hf_hub_download(
+        repo_id="grc-iit/llama31-8b-aurora-chat-v3-gguf",
+        filename="llama_A-f16.gguf",
+        local_dir=model_dir,
+    )
+    size_gb = os.path.getsize(gguf_path) / 1e9
+    print(f"Downloaded: {gguf_path} ({size_gb:.1f} GB)")
+PYEOF
+export MODEL_DIR
+
+echo "" | tee -a "${LOGFILE}"
+echo "=== [3] Download tokenizer + config.json ===" | tee -a "${LOGFILE}"
+${IPEX_LLM_ENV}/bin/python - <<'PYEOF' 2>&1 | tee -a "${LOGFILE}"
+import os
+from transformers import AutoTokenizer, AutoConfig
+from huggingface_hub import hf_hub_download
+
+model_dir = os.environ.get('MODEL_DIR', '/lus/flare/projects/gpu_hack/iowarp/llm_models/llama31-8b-aurora-chat')
+BASE_REPO = "NousResearch/Meta-Llama-3.1-8B-Instruct"
+
+# Tokenizer
+tok_file = os.path.join(model_dir, 'tokenizer.json')
+if os.path.exists(tok_file):
+    print(f"Tokenizer already exists — skipping")
+else:
+    print(f"Downloading tokenizer from {BASE_REPO} ...")
+    tok = AutoTokenizer.from_pretrained(BASE_REPO)
+    tok.save_pretrained(model_dir)
+    print(f"Tokenizer saved. Vocab size: {tok.vocab_size}")
+
+# config.json — required by from_pretrained to identify model architecture
+cfg_file = os.path.join(model_dir, 'config.json')
+if os.path.exists(cfg_file):
+    print(f"config.json already exists — skipping")
+else:
+    print(f"Downloading config.json from {BASE_REPO} ...")
+    for fname in ['config.json', 'generation_config.json', 'special_tokens_map.json']:
+        try:
+            hf_hub_download(BASE_REPO, filename=fname, local_dir=model_dir)
+            print(f"  {fname} saved")
+        except Exception as e:
+            print(f"  {fname} skipped: {e}")
+PYEOF
+
+echo "" | tee -a "${LOGFILE}"
+echo "=== [4] Load model with ipex-llm on XPU ===" | tee -a "${LOGFILE}"
+${IPEX_LLM_ENV}/bin/python - <<'PYEOF' 2>&1 | tee -a "${LOGFILE}"
+import os, time, torch
+import intel_extension_for_pytorch as ipex
+import warnings
+warnings.filterwarnings("ignore")
+
+model_dir = os.environ.get('MODEL_DIR', '/lus/flare/projects/gpu_hack/iowarp/llm_models/llama31-8b-aurora-chat')
+gguf_file = "llama_A-f16.gguf"
+
+from transformers import AutoTokenizer
+from ipex_llm.transformers import AutoModelForCausalLM
+
+device = "xpu" if torch.xpu.is_available() else "cpu"
+print(f"Using device: {device}")
+if torch.xpu.is_available():
+    print(f"XPU device count: {torch.xpu.device_count()}")
+
+# Load tokenizer
+print("Loading tokenizer ...")
+tokenizer = AutoTokenizer.from_pretrained(model_dir)
+
+# Load model via ipex_llm with INT4 quantization for fast XPU inference
+print(f"Loading model from {model_dir}/{gguf_file} ...")
+t0 = time.time()
+model = AutoModelForCausalLM.from_pretrained(
+    model_dir,
+    gguf_file=gguf_file,
+    load_in_low_bit="sym_int4",
+    trust_remote_code=True,
+    low_cpu_mem_usage=True,
+)
+load_time = time.time() - t0
+print(f"Model loaded in {load_time:.1f} s")
+print(f"Model dtype: {next(model.parameters()).dtype}")
+
+# Move to XPU (ipex_llm keeps weights quantized on device)
+print(f"Moving model to {device} ...")
+t1 = time.time()
+model = model.to(device)
+if device == "xpu":
+    torch.xpu.synchronize()
+move_time = time.time() - t1
+print(f"Moved to {device} in {move_time:.1f} s")
+model.eval()
+
+# Simple prompt test
+prompts = [
+    "What is the hippocampus and what role does it play in memory?",
+    "Explain CoreNEURON GPU simulation in one sentence.",
+]
+
+for i, prompt in enumerate(prompts):
+    print(f"\n--- Prompt {i+1}: {prompt}")
+    messages = [{"role": "user", "content": prompt}]
+
+    # Apply chat template
+    try:
+        input_text = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+    except Exception:
+        input_text = f"<|user|>\n{prompt}\n<|assistant|>\n"
+
+    inputs = tokenizer(input_text, return_tensors="pt").to(device)
+    input_len = inputs["input_ids"].shape[-1]
+
+    t_gen = time.time()
+    with torch.no_grad():
+        output = model.generate(
+            **inputs,
+            max_new_tokens=128,
+            do_sample=False,
+            pad_token_id=tokenizer.eos_token_id,
+        )
+    if device == "xpu":
+        torch.xpu.synchronize()
+    gen_time = time.time() - t_gen
+    new_tokens = output.shape[-1] - input_len
+    tok_per_s = new_tokens / gen_time if gen_time > 0 else 0
+
+    response = tokenizer.decode(output[0][input_len:], skip_special_tokens=True)
+    print(f"Response ({new_tokens} tokens, {tok_per_s:.1f} tok/s, {gen_time:.1f} s):")
+    print(response.strip())
+PYEOF
+
+echo "" | tee -a "${LOGFILE}"
+echo "=== DONE ===" | tee -a "${LOGFILE}"
+cp "${LOGFILE}" /home/hyoklee/bin/llm_aurora_test_run.log
