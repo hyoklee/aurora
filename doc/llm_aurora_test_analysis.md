@@ -25,13 +25,19 @@ Three compounding issues caused the job to fall back to CPU:
 
 ---
 
-## Expected Performance After Fix
+## Actual Performance Results (job 8473015, 2026-05-07)
 
-| Metric | Before (CPU) | After (XPU, INT4) |
-|---|---|---|
-| Device | CPU | Intel PVC XPU (`xpu:0`) |
-| Throughput | ~3 tok/s | ~20–50+ tok/s |
-| Model load | 91.5 s | faster (INT4, smaller weights) |
-| VRAM footprint | 16 GB CPU RAM (FP16) | ~4 GB XPU VRAM (INT4) |
+| Metric | Before (CPU, `pytorch_env`) | After (XPU, `ipex-llm`) | Speedup |
+|---|---|---|---|
+| `XPU available` | False | True (6x Max 1550) | — |
+| Model load | 91.5 s | 52.9 s | 1.7x faster |
+| Move to device | 0.0 s (stayed on CPU) | 0.5 s | — |
+| Prompt 1 (92 tokens) | 3.2 tok/s / 29.0 s | 19.6 tok/s / 4.7 s | **6.1x** |
+| Prompt 2 (33 tokens) | 3.2 tok/s / 10.3 s | 31.5 tok/s / 1.0 s | **10.3x** |
 
-Aurora nodes have 6 Intel Data Center GPU Max 1550 (Ponte Vecchio) GPUs per node. The script requests `ngpus=6` but currently targets `xpu:0` (one tile). Multi-GPU sharding with `device_map` is a future improvement if throughput needs to scale further.
+The higher tok/s on the second prompt is expected — the XPU JIT-compiles kernels on first use, so subsequent generations run faster (warm vs cold dispatch).
+
+## Notes
+
+- `ipex_llm.transformers.AutoModelForCausalLM` cannot be used in this env: the `intel_extension_for_pytorch.llm` namespace is a file, not a directory, causing a `ModuleNotFoundError` in ipex_llm's internal import chain. Vanilla `transformers` + direct `import intel_extension_for_pytorch as ipex` is the working alternative.
+- Aurora nodes have 6 Intel Data Center GPU Max 1550 (Ponte Vecchio, 128 GB HBM2e each) per node. The script currently runs on `xpu:0`. Multi-GPU sharding with `device_map` is a future improvement if throughput needs to scale further.
