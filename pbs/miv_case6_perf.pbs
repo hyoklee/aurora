@@ -1,0 +1,124 @@
+#!/bin/bash
+#PBS -N miv_case6_perf
+#PBS -q debug-scaling
+#PBS -l select=1
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=home:flare
+#PBS -A gpu_hack
+#PBS -j oe
+
+# ─── env ─────────────────────────────────────────────────────────────
+source ~/miniconda3/etc/profile.d/conda.sh
+conda activate miv
+
+set -euo pipefail
+
+# Aurora MPICH mpicc and Cray PALS mpiexec must precede conda's OpenMPI equivalents
+AURORA_MPICH=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/mpich-5.0.0.aurora_test.3c70a61-hlkigtk
+export PATH=/opt/cray/pals/default/bin:${AURORA_MPICH}/bin:$PATH
+# Disable HDF5 file locking — required on Lustre (POSIX locks can fail on compute nodes)
+export HDF5_USE_FILE_LOCKING=FALSE
+
+CASE_DIR=~/MiV-Simulator-Cases/6-gapjunctions
+MIV_PREFIX=$CONDA_PREFIX
+
+NRN_DATA=$MIV_PREFIX/lib/python3.12/site-packages/neuron/.data
+NRNUNITS=$NRN_DATA/share/nmodl/nrnunits.lib
+
+LOG_DIR=~/wrp/run
+mkdir -p "$LOG_DIR"
+RUN_LOG=$LOG_DIR/miv_case6_perf_run.log
+TIMING_CSV=$LOG_DIR/miv_case6_perf_timing.csv
+echo "timestamp,condition,phase,elapsed_s" > "$TIMING_CSV"
+
+# Input files on Lustre
+# dataset_prefix = parent of "Microcircuit_Small/" (env.py joins: prefix/DatasetName/CellData)
+NEUROH5=/lus/flare/projects/gpu_hack/iowarp/neuroh5
+INPUT_PREFIX=$NEUROH5
+
+exec &> >(tee -a "$RUN_LOG")
+echo "=== MiV Case 6 perf sweep $(date) PBS_JOBID=$PBS_JOBID ==="
+
+SMALL=$INPUT_PREFIX/Microcircuit_Small
+
+# ─── verify inputs ────────────────────────────────────────────────────
+echo "--- Input files ---"
+for f in \
+    "$SMALL/MiV_Cells_Microcircuit_Small_20220410.h5" \
+    "$SMALL/MiV_Connections_Microcircuit_Small_20220410.h5" \
+    "$SMALL/MiV_gapjunctions_20230408.h5" \
+    "$SMALL/MiV_h5types_gj.h5" \
+    "$NEUROH5/MiV_input_spikes.h5"; do
+    ls -lh "$f" 2>/dev/null || echo "MISSING: $f"
+done
+
+# Remove x86_64/ entirely — libcorenrnmech.so from nrnivmodl-core may be
+# auto-loaded by NEURON and corrupt HDF5/MPI state. Skip special-core build.
+# compile_and_load handles CPU mechanism compilation via mechanisms/compiled/.
+cd "$CASE_DIR"
+rm -rf x86_64/
+
+# ─── pre-stage to /dev/shm ────────────────────────────────────────────
+# Mirror Lustre structure: dataset_prefix/Microcircuit_Small/*.h5
+SHAREDMEM=/dev/shm/miv_case6
+mkdir -p "$SHAREDMEM/Microcircuit_Small"
+echo "--- Pre-staging to /dev/shm ---"
+t_pre=$(date +%s%3N)
+cp "$SMALL/MiV_Cells_Microcircuit_Small_20220410.h5"    "$SHAREDMEM/Microcircuit_Small/"
+cp "$SMALL/MiV_Connections_Microcircuit_Small_20220410.h5" "$SHAREDMEM/Microcircuit_Small/"
+cp "$SMALL/MiV_gapjunctions_20230408.h5"                "$SHAREDMEM/Microcircuit_Small/"
+cp "$SMALL/MiV_h5types_gj.h5"                           "$SHAREDMEM/Microcircuit_Small/"
+cp "$NEUROH5/MiV_input_spikes.h5"                        "$SHAREDMEM/"
+t_post=$(date +%s%3N)
+echo "Pre-stage: $(( (t_post - t_pre) / 1000 )).$((  (t_post - t_pre) % 1000 )) s"
+echo "$(date -u +%FT%TZ),prestage,copy,$(echo "scale=3; ($t_post - $t_pre)/1000" | bc)" >> "$TIMING_CSV"
+
+# ─── helper: run-network wrapper ─────────────────────────────────────
+run_condition() {
+    local label=$1
+    local prefix=$2
+    local extra_args="${3:-}"
+    echo "=== Condition $label: prefix=$prefix ==="
+    t0=$(date +%s%3N)
+    timeout 600 mpiexec -n 12 \
+        run-network \
+        --config-prefix "$CASE_DIR/config" \
+        --config-file Microcircuit_Small.yaml \
+        --dataset-prefix "$prefix" \
+        --results-path "$CASE_DIR/results" \
+        --io-size 0 \
+        --tstop 100 \
+        --dt 0.025 \
+        $extra_args \
+        2>&1 | tee "$LOG_DIR/miv_case6_${label}.log" | tail -20 && STATUS=ok || STATUS=fail_$?
+    t1=$(date +%s%3N)
+    elapsed=$(echo "scale=3; ($t1 - $t0)/1000" | bc)
+    echo "Condition $label: $STATUS in ${elapsed}s"
+    echo "$(date -u +%FT%TZ),$label,total,$elapsed" >> "$TIMING_CSV"
+}
+
+# ─── A: CPU + Lustre ─────────────────────────────────────────────────
+run_condition A "$INPUT_PREFIX"
+
+# ─── B: CPU + /dev/shm ───────────────────────────────────────────────
+run_condition B "$SHAREDMEM"
+
+# ─── C: Intel GPU + Lustre (only if special-core was built) ──────────
+if [ -f "$CASE_DIR/x86_64/special-core" ]; then
+    run_condition C "$INPUT_PREFIX" "--use-coreneuron --coreneuron-gpu"
+else
+    echo "SKIP Condition C: special-core not available"
+fi
+
+# ─── D: Intel GPU + /dev/shm ─────────────────────────────────────────
+if [ -f "$CASE_DIR/x86_64/special-core" ]; then
+    run_condition D "$SHAREDMEM" "--use-coreneuron --coreneuron-gpu"
+else
+    echo "SKIP Condition D: special-core not available"
+fi
+
+# ─── cleanup ─────────────────────────────────────────────────────────
+rm -rf "$SHAREDMEM"
+echo "=== Done $(date) ==="
+echo "Timing results: $TIMING_CSV"
+cat "$TIMING_CSV"
