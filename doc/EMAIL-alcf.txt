@@ -1,0 +1,115 @@
+To: support@alcf.anl.gov
+Subject: Aurora: IGC internal compiler error (SIGSEGV) compiling SPIR-V for PVC — reproducible on a login node
+
+Hello,
+
+I'm hitting a reproducible Intel Graphics Compiler crash on Aurora that blocks
+five GPU tests in our project (IOWarp / radix-io). It reproduces offline on a
+login node in a few seconds, with no GPU and no allocation, so it should be
+cheap to confirm.
+
+WHAT HAPPENS
+
+IGC segfaults translating SPIR-V to PVC ISA. At runtime the SYCL runtime
+surfaces it as a failed program build and the process aborts:
+
+  terminate called after throwing an instance of 'sycl::_V1::exception'
+    what():  The program was built for 1 devices
+  Build program log for 'Intel(R) Data Center GPU Max 1550':
+  IGC: Internal Compiler Error: Segmentation violation
+
+REPRODUCER (login node, no GPU)
+
+  cd /lus/flare/projects/IOWarp/hyoklee/igc_ice_repro
+  ./repro.sh
+
+which is just:
+
+  ocloc compile -spirv_input -file one_kernel_nested_loop.spv \
+      -device pvc -out_dir /tmp/out
+  -> IGC: Internal Compiler Error: Segmentation violation
+  -> Build failed with error code: -11
+
+That directory also holds the single-kernel SPIR-V, the ~85-line source it was
+built from, the exact icpx commands, and a gdb backtrace. It is readable by the
+IOWarp group; I'm happy to copy it anywhere more convenient.
+
+VERSIONS
+
+  IGC          libigc.so.2.11.43+0  (libigdfcl-devel-2.11.43-1146.x86_64)
+  ocloc / NEO  intel-ocloc-25.18.33578.77-1146.x86_64
+  DPC++        2025.3.2.20260112 (oneapi/release/2025.3.1)
+               2026.1.0.20260617 (oneapi/release/2026.1.0)
+               -- both affected
+  Device       Intel Data Center GPU Max 1550 (-device pvc)
+  OS           SLES 15-SP7
+  Node         aurora-uan-0012
+
+Note that IGC lives in /usr/lib64 and is not part of the oneapi module, so both
+module versions share one IGC. That is why changing module version has no
+effect, and why I think this needs a package update rather than a workaround on
+my side.
+
+WHERE IT CRASHES
+
+The last IGC dump written before the fault is *_optimized.ll, so it is past
+IGC's own optimisation stage. libigc.so.2 is stripped, so the top frames have no
+symbols:
+
+  #0 .. #9   libigc.so.2        (no symbols)
+  #10        IGC::IgcOclTranslationCtx<0ul>::Impl::Translate(...)
+  #11        IGC::IgcOclTranslationCtx<1ul>::TranslateImpl(...)
+  #12 ..     libocloc.so -> oclocInvoke
+
+A full IGC dump is reproducible with:
+
+  IGC_ShaderDumpEnable=1 IGC_DumpToCustomDir=<dir> ocloc compile -spirv_input \
+      -file one_kernel_nested_loop.spv -device pvc -out_dir /tmp/out
+
+The failing module is a large -O0 device image: ~5 MB SPIR-V, ~400 functions,
+no inlining, built around a switch that re-enters mid-function (a Duff's-device
+coroutine, which is how we express suspension on SPIR-V since clang cannot
+compile C++20 device coroutines for spir64).
+
+WHAT I ALREADY RULED OUT
+
+  -options "-cl-opt-disable"                        ICE
+  -options "-g" / no options / "-O2"                ICE
+  DPC++ 2026.1.0 instead of 2025.3.1                ICE (same system IGC)
+  ONEAPI_DEVICE_SELECTOR=level_zero:0 (one device)  ICE ("built for 1 devices")
+  AOT per translation unit (-fsycl-targets=spir64_gen)
+                                                    compiles
+  -fsycl-device-code-split=per_kernel               per-kernel images build,
+                                                    but the image holding the
+                                                    offending kernel still ICEs
+
+So it is not the device count, not the optimisation level, not the module
+version, and not how many kernels share an image -- one kernel alone in its own
+image reproduces it. The single-TU AOT path compiling fine suggests the problem
+is in the linked device image.
+
+For one of the five affected kernels I found a source workaround: a dynamic loop
+nest inlined into the resumable body was the trigger, and lifting it into a
+non-template noinline function over raw pointers compiles. For the other four
+the crash survives removing all user compute from the body, so there is nothing
+left for me to lift out.
+
+ASK
+
+An IGC build that does not segfault on these modules, or guidance on what to
+avoid in a kernel of this shape. If it helps, a symbolised libigc.so.2 or the
+output of a debug IGC on the attached SPIR-V would localise the pass, and I can
+run that here.
+
+Affected tests, for reference (dashboard: https://my.cdash.org/builds/4251649):
+
+  cte_gpu_vector_kmeans_macros_sycl          (worked around)
+  cte_gpu_vector_grayscott_macros_sycl
+  cte_gpu_vector_gmx_macros_sycl
+  cte_gpu_vector_lammps_md_macros_sycl
+  cte_gpu_vector_lammps_md_evict_macros_sycl
+
+Thanks,
+Hyo-Kyung Lee
+hyoklee@hdfgroup.org
+Projects: IOWarp, radix-io
