@@ -40,8 +40,25 @@ ocloc compile -spirv_input -file k.0 -device pvc -out_dir /tmp/out
   Build failed with error code: -11
 ```
 
-Packaged reproducer, including a single-kernel image and the exact build
-commands: `/lus/flare/projects/IOWarp/hyoklee/igc_ice_repro/` (`./repro.sh`).
+`bin/igc_ice_repro.sh` in this repo does both steps for any number of images:
+
+```
+# every macro-form launch library in a build tree
+module load oneapi/release/2025.3.1
+bin/igc_ice_repro.sh $CLIO_BUILD/bin/lib*_macros_sycl_launch.so
+
+# or a device image already extracted
+bin/igc_ice_repro.sh one_kernel_nested_loop.spv
+```
+
+It prints `ok` or `ICE` per image and exits non-zero if any crashed, so it also
+works as a gate: run it against a rebuilt library to check a source change, or
+against the same images after an IGC update to see whether the crash is gone --
+no GPU, no queue.
+
+Packaged reproducer, including a single-kernel image, the exact build commands
+and a drafted support ticket:
+`/lus/flare/projects/IOWarp/hyoklee/igc_ice_repro/`.
 
 ### Which kernels
 
