@@ -1,0 +1,75 @@
+#!/bin/bash
+#PBS -N build_tf_aurora
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/build_tf_aurora.out
+#PBS -e /home/hyoklee/wrp/run/build_tf_aurora.err
+#
+# Build ~/clio-core.dev.wrk (branch aurora-tf-congruence) for the Terra Fusion
+# congruence run on Aurora: everything ../pbs/tf_congruence.pbs needs.
+#
+#   CAE + S3        clio_cae imports the granules from s3://terrafusiondatasampler
+#                   (striped ranged GETs, cfs:: destinations)
+#   SYCL            CTE's hbm tier is real GPU memory only in a GPU build
+#   FUSE adapter    clio_cte_fuse mounts the clio-fs namespace the granules
+#                   are imported into, so the Python pipeline reads plain files
+#
+# The AWS SDK (for cae_s3_tool) is the one ../bin/build_cae_s3.pbs installs.
+
+set -eo pipefail
+SRC=/home/hyoklee/clio-core.dev.wrk
+WORK=/lus/flare/projects/IOWarp/hyoklee
+BUILD=${BUILD:-${WORK}/build_tf_aurora}
+AWS_PREFIX=${WORK}/deps/aws-sdk-cpp-1.11.599
+ONEAPI=/opt/aurora/26.26.0/oneapi/compiler/latest
+CMAKE=/home/hyoklee/miniconda3/bin/cmake
+LOG=/home/hyoklee/wrp/run/build_tf_aurora_run.log
+
+: > "$LOG"
+exec > >(tee -a "$LOG") 2>&1
+echo "[$(date)] host=$(hostname) source HEAD: $(git -C "$SRC" log --oneline -1)"
+source "${ONEAPI}/env/vars.sh" > /dev/null 2>&1
+
+echo "=== [1] Configure -> ${BUILD} ==="
+$CMAKE -S "$SRC" -B "$BUILD" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER=${ONEAPI}/bin/icx \
+    -DCMAKE_CXX_COMPILER=${ONEAPI}/bin/icpx \
+    -DCMAKE_PREFIX_PATH="${AWS_PREFIX}" \
+    -DCMAKE_BUILD_RPATH="${AWS_PREFIX}/lib" \
+    -DPoco_DIR=/home/hyoklee/miniconda3/lib/cmake/Poco \
+    -Dcereal_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/cereal \
+    -DZeroMQ_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/ZeroMQ \
+    -Dmsgpack-c_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/msgpack-c \
+    -Dnlohmann_json_DIR=/home/hyoklee/miniconda3/share/cmake/nlohmann_json \
+    -DCMAKE_EXE_LINKER_FLAGS="" \
+    -DCMAKE_SHARED_LINKER_FLAGS="" \
+    -DCMAKE_MODULE_LINKER_FLAGS="" \
+    -DCLIO_CORE_ENABLE_CAE=ON \
+    -DCAE_ENABLE_S3=ON \
+    -DCLIO_CORE_ENABLE_SYCL=ON \
+    -DCLIO_CTP_ENABLE_SYCL=ON \
+    -DCLIO_CTE_ENABLE_FUSE_ADAPTER=ON \
+    -DCLIO_CORE_ENABLE_TESTS=OFF \
+    -DCLIO_CORE_ENABLE_BENCHMARKS=OFF
+
+echo "=== [2] Verify the options survived configure ==="
+for opt in CAE_ENABLE_S3 CLIO_CORE_ENABLE_SYCL CLIO_CTE_ENABLE_FUSE_ADAPTER; do
+    grep -q "^${opt}:BOOL=ON" "${BUILD}/CMakeCache.txt" \
+        || { echo "ERROR: ${opt} is not ON after configure" >&2; exit 1; }
+    echo "${opt}=ON"
+done
+
+echo "=== [3] Build (all targets: the chimod runtime libraries are separate) ==="
+$CMAKE --build "$BUILD" -j "$(nproc)"
+
+echo "=== [4] Check binaries ==="
+for exe in clio_run clio_cae clio_cte_fuse cte_search; do
+    test -x "${BUILD}/bin/${exe}" || { echo "ERROR: ${exe} not built" >&2; exit 1; }
+    echo "OK ${exe}"
+done
+ls "${BUILD}"/bin/libclio_cte_filesystem_runtime.so "${BUILD}"/bin/libclio_cae_core_runtime.so
+echo "[$(date)] Done: ${BUILD}/bin"

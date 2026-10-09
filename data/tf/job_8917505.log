@@ -1,0 +1,167 @@
+[21:17:13 +0s] host=x4009c5s3b0n0 run=/lus/flare/projects/IOWarp/hyoklee/tf_congruence/run_8917505
+[21:17:13 +0s] clio-core: 9a1b2b30 fix(cae): wait for the clio-fs pool before a cfs:: import
+[21:17:13 +0s] tiers: hbm=48GB ram=320GB lustre=400GB  S3 streams=16 x 32MiB
+[21:17:18 +5s] runtime up
+[21:17:29 +16s] clio-fs mounted at /tmp/tf_mnt_8917505
+[21:17:29 +16s] 10 transfer(s) from terra_fusion.omni.yaml
+[21:25:01 +468s] ingested O10903: 50978 MB in 452s = 112 MB/s
+[21:25:06 +473s] verified O10903: size 50978715628 OK, 5 x 1 MiB match S3
+    target                                                        score        free_MB
+    ram::tf_ram_node0                                              1.00       292618.7
+    hbm::tf_hbm_node0                                              0.60        51539.6
+    /lus/flare/projects/IOWarp/hyoklee/tf_congruence/data/cte_lustre_tier.dat_node0   0.20       429496.7
+[21:25:06 +473s] analysis of O10903 started on GPU tile 0 (regrid=gpu)
+[21:31:38 +865s] ingested O11369: 45263 MB in 392s = 115 MB/s
+[21:31:43 +870s] verified O11369: size 45263897169 OK, 5 x 1 MiB match S3
+    target                                                        score        free_MB
+    ram::tf_ram_node0                                              1.00       247354.8
+    hbm::tf_hbm_node0                                              0.60        51539.6
+    /lus/flare/projects/IOWarp/hyoklee/tf_congruence/data/cte_lustre_tier.dat_node0   0.20       429496.7
+[21:31:44 +871s] analysis of O11369 started on GPU tile 1 (regrid=gpu)
+[21:38:15 +1262s] ingested O10670: 45133 MB in 391s = 115 MB/s
+[21:38:20 +1267s] verified O10670: size 45133547913 OK, 5 x 1 MiB match S3
+    target                                                        score        free_MB
+    ram::tf_ram_node0                                              1.00       202221.2
+    hbm::tf_hbm_node0                                              0.60        51539.6
+    /lus/flare/projects/IOWarp/hyoklee/tf_congruence/data/cte_lustre_tier.dat_node0   0.20       429496.7
+[21:38:20 +1267s] analysis of O10670 started on GPU tile 2 (regrid=gpu)
+[21:44:02 +1609s] ingested O11602: 39588 MB in 342s = 115 MB/s
+[21:44:07 +1614s] verified O11602: size 39588556213 OK, 5 x 1 MiB match S3
+    target                                                        score        free_MB
+    ram::tf_ram_node0                                              1.00       162632.7
+    hbm::tf_hbm_node0                                              0.60        51539.6
+    /lus/flare/projects/IOWarp/hyoklee/tf_congruence/data/cte_lustre_tier.dat_node0   0.20       429496.7
+[21:44:08 +1615s] analysis of O11602 started on GPU tile 3 (regrid=gpu)
+[21:51:13 +2040s] ingested O10204: 32871 MB in 425s = 77 MB/s
+[21:51:18 +2045s] verified O10204: size 32871364681 OK, 5 x 1 MiB match S3
+    target                                                        score        free_MB
+    ram::tf_ram_node0                                              1.00       129761.3
+    hbm::tf_hbm_node0                                              0.60        51539.6
+    /lus/flare/projects/IOWarp/hyoklee/tf_congruence/data/cte_lustre_tier.dat_node0   0.20       429496.7
+[21:51:18 +2045s] analysis of O10204 started on GPU tile 4 (regrid=check)
+[21:55:26 +2293s] ingested O11136: 28329 MB in 248s = 114 MB/s
+[21:55:32 +2299s] verified O11136: size 28329446987 OK, 5 x 1 MiB match S3
+    target                                                        score        free_MB
+    ram::tf_ram_node0                                              1.00       101431.9
+    hbm::tf_hbm_node0                                              0.60        51539.6
+    /lus/flare/projects/IOWarp/hyoklee/tf_congruence/data/cte_lustre_tier.dat_node0   0.20       429496.7
+[21:55:32 +2299s] analysis of O11136 started on GPU tile 5 (regrid=gpu)
+[21:58:58 +2505s] ingested O11835: 23680 MB in 206s = 114 MB/s
+[21:59:03 +2510s] verified O11835: size 23680863204 OK, 5 x 1 MiB match S3
+    target                                                        score        free_MB
+    ram::tf_ram_node0                                              1.00        77751.0
+    hbm::tf_hbm_node0                                              0.60        51539.6
+    /lus/flare/projects/IOWarp/hyoklee/tf_congruence/data/cte_lustre_tier.dat_node0   0.20       429496.7
+[21:59:04 +2511s] analysis of O11835 started on GPU tile 6 (regrid=gpu)
+[22:01:50 +2677s] ingested O10437: 17417 MB in 166s = 104 MB/s
+[22:01:55 +2682s] verified O10437: size 17417656538 OK, 5 x 1 MiB match S3
+    target                                                        score        free_MB
+    ram::tf_ram_node0                                              1.00        60333.3
+    hbm::tf_hbm_node0                                              0.60        51539.6
+    /lus/flare/projects/IOWarp/hyoklee/tf_congruence/data/cte_lustre_tier.dat_node0   0.20       429496.7
+[22:01:55 +2682s] analysis of O10437 started on GPU tile 7 (regrid=gpu)
+[22:04:22 +2829s] ingested O1117: 16820 MB in 147s = 114 MB/s
+[22:04:27 +2834s] verified O1117: size 16820087533 OK, 5 x 1 MiB match S3
+    target                                                        score        free_MB
+    ram::tf_ram_node0                                              1.00        43513.2
+    hbm::tf_hbm_node0                                              0.60        51539.6
+    /lus/flare/projects/IOWarp/hyoklee/tf_congruence/data/cte_lustre_tier.dat_node0   0.20       429496.7
+[22:04:28 +2835s] analysis of O1117 started on GPU tile 8 (regrid=gpu)
+[22:05:06 +2873s] ingested O12068: 4169 MB in 38s = 109 MB/s
+[22:05:11 +2878s] verified O12068: size 4169637053 OK, 5 x 1 MiB match S3
+    target                                                        score        free_MB
+    ram::tf_ram_node0                                              1.00        39343.6
+    hbm::tf_hbm_node0                                              0.60        51539.6
+    /lus/flare/projects/IOWarp/hyoklee/tf_congruence/data/cte_lustre_tier.dat_node0   0.20       429496.7
+[22:05:12 +2879s] analysis of O12068 started on GPU tile 9 (regrid=gpu)
+[22:05:12 +2879s] ingest done: 304253 MB in 2807s of clio_cae = 108 MB/s
+[22:05:12 +2879s] analysis O11602 OK:     congruence: 49 blocks  OK
+[22:05:12 +2879s] analysis O11835 OK:     congruence: 14 blocks  OK
+[22:05:13 +2880s] analysis O12068 FAILED: !!! blocks failed (rc=1) after 0s
+[22:05:13 +2880s] analysis O1117 FAILED: !!! blocks failed (rc=1) after 37s
+[22:05:13 +2880s] analysis O10204 OK:     congruence: 32 blocks  OK
+[22:05:13 +2880s] analysis O11136 OK:     congruence: 27 blocks  OK
+[22:05:13 +2880s] analysis O10437 FAILED: !!! sources failed (rc=1) after 47s
+[22:05:13 +2880s] analysis O10903 OK:     congruence: 75 blocks  OK
+[22:05:13 +2880s] analysis O10670 OK:     congruence: 52 blocks  OK
+[22:05:13 +2880s] analysis O11369 OK:     congruence: 66 blocks  OK
+=== stage times (s) per granule
+O10204 {"blocks":0,"contrast":4,"congruence":31,"sources":9} {"regrid":"check","device":"xpu","blocks":32,"regrid_s":26.35139513015747,"aster_read_s":2.6477463245391846,"total_s":29.334043741226196}
+/var/spool/pbs/mom_priv/jobs/8917505.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov.SC: line 282: /lus/flare/projects/IOWarp/hyoklee/tf_congruence/run_8917505/work/O10437/timing_b31_WN.json: No such file or directory
+O10437 {"blocks":146,"sources":47} 
+O10670 {"blocks":0,"contrast":13,"congruence":34,"sources":12} {"regrid":"gpu","device":"xpu","blocks":52,"regrid_s":16.55257225036621,"aster_read_s":5.3050432205200195,"total_s":30.725069999694824}
+O10903 {"blocks":2,"contrast":10,"congruence":20,"sources":9} {"regrid":"gpu","device":"xpu","blocks":75,"regrid_s":7.7390456199646,"aster_read_s":6.090083599090576,"total_s":17.084378719329834}
+O11136 {"blocks":24,"contrast":36,"congruence":43,"sources":34} {"regrid":"gpu","device":"xpu","blocks":27,"regrid_s":3.5499558448791504,"aster_read_s":2.2534680366516113,"total_s":7.932966709136963}
+/var/spool/pbs/mom_priv/jobs/8917505.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov.SC: line 282: /lus/flare/projects/IOWarp/hyoklee/tf_congruence/run_8917505/work/O1117/timing_b31_WN.json: No such file or directory
+O1117 {"blocks":37} 
+O11369 {"blocks":1,"contrast":9,"congruence":17,"sources":10} {"regrid":"gpu","device":"xpu","blocks":66,"regrid_s":6.50576376914978,"aster_read_s":5.291861057281494,"total_s":14.373844861984253}
+O11602 {"blocks":1,"contrast":7,"congruence":16,"sources":9} {"regrid":"gpu","device":"xpu","blocks":49,"regrid_s":6.102646112442017,"aster_read_s":4.04287314414978,"total_s":12.767236948013306}
+O11835 {"blocks":166,"contrast":2,"congruence":43,"sources":156} {"regrid":"gpu","device":"xpu","blocks":14,"regrid_s":1.8573050498962402,"aster_read_s":38.926804542541504,"total_s":40.888386249542236}
+/var/spool/pbs/mom_priv/jobs/8917505.aurora-pbs-0001.hostmgmt.cm.aurora.alcf.anl.gov.SC: line 282: /lus/flare/projects/IOWarp/hyoklee/tf_congruence/run_8917505/work/O12068/timing_b31_WN.json: No such file or directory
+O12068 {"blocks":0} 
+regrid check O10204: {"cells":322800,"both_nan":22852,"equal":299948,"differ":0,"max_abs_diff":0.0}
+=== ranking
+# O10437: no results, skipped
+# O1117: no results, skipped
+# O12068: no results, skipped
+# 315 blocks from 7 granules   C5 min=0.355 median=0.699 max=0.920
+# C5 vs Kendall W across all blocks: r=0.9892
+
+# per granule
+orbit     blocks  C5 min  median     max
+O10204        32   0.508   0.720   0.867
+O10670        52   0.425   0.659   0.872
+O10903        75   0.481   0.703   0.920
+O11136        27   0.509   0.704   0.827
+O11369        66   0.374   0.701   0.887
+O11602        49   0.355   0.692   0.891
+O11835        14   0.585   0.738   0.882
+
+# TOP 12 DISCREPANCY BLOCKS, all granules pooled (lowest C5 first)
+ rk orbit      blk    lat0    lat1     lon0     C5      W  cells    weak   gap  loadings
+  0 O11602      46  -25.84  -25.17   122.91  0.355  0.328   1089    MISR  0.45  MODI=0.63 ASTE=0.54 CERE=0.43 MOPI=0.30 MISR=0.18
+  1 O11369      14    7.02    7.69   132.26  0.374  0.333    990  MOPITT  0.61  MODI=0.61 ASTE=0.58 MISR=0.46 CERE=0.27 MOPI=0.01
+  2 O10670      31  -69.85  -69.05   101.72  0.425  0.400   2757    MISR  0.45  MODI=0.59 ASTE=0.57 MOPI=0.43 CERE=0.35 MISR=0.14
+  3 O10670      43  -75.97  -75.09   -25.24  0.430  0.412   3887    MISR  0.43  MODI=0.58 ASTE=0.49 MOPI=0.47 CERE=0.42 MISR=0.15
+  4 O11369      10    9.16    9.83   132.72  0.444  0.396    994    MISR  0.52  MODI=0.61 ASTE=0.60 CERE=0.38 MOPI=0.34 MISR=0.09
+  5 O11369      26    0.60    1.26   130.90  0.449  0.389    982    MISR  0.57  MODI=0.61 ASTE=0.60 MOPI=0.41 CERE=0.31 MISR=0.05
+  6 O11369      13    7.55    8.22   132.37  0.450  0.417    992   CERES  0.38  MODI=0.59 ASTE=0.58 MOPI=0.43 MISR=0.27 CERE=0.22
+  7 O11369      11    8.62    9.29   132.60  0.456  0.421    994  MOPITT  0.49  MODI=0.61 ASTE=0.58 CERE=0.40 MISR=0.34 MOPI=0.13
+  8 O11369       0   14.50   15.17   133.90  0.457  0.433   1011  MOPITT  0.39  MODI=0.58 MISR=0.53 ASTE=0.53 CERE=0.23 MOPI=0.20
+  9 O11369      15    6.48    7.15   132.14  0.458  0.435    987   CERES  0.26  MODI=0.58 ASTE=0.52 MISR=0.43 MOPI=0.33 CERE=0.32
+ 10 O11369      12    8.09    8.76   132.49  0.473  0.391    992    MISR  0.55  MODI=0.60 ASTE=0.59 MOPI=0.52 CERE=0.14 MISR=0.05
+ 11 O10903      65  -14.39  -13.73   127.72  0.481  0.446   1013    MISR  0.38  MODI=0.59 ASTE=0.58 MOPI=0.39 CERE=0.35 MISR=0.21
+
+# MOST congruent block overall
+  O10903 blk 48  -5.29--4.63N  C5=0.920
+
+# weakest-sensor tally across all 315 blocks: {'MISR': 140, 'MOPITT': 109, 'CERES': 65, 'ASTER': 1}
+
+# wrote all_granule_ranking.json (315 blocks)
+
+# TOP 12 after the 2.0 K band-31 contrast floor (268 of 315 blocks kept)
+  0 O11602      46  -25.84  -25.17   122.91  0.355 sd= 3.29K BT= 303.6K    MISR  0.45
+  1 O11369      26    0.60    1.26   130.90  0.449 sd= 4.04K BT= 292.8K    MISR  0.57
+  2 O10903      65  -14.39  -13.73   127.72  0.481 sd= 8.68K BT= 286.7K    MISR  0.38
+  3 O10903      71  -17.60  -16.94   127.01  0.485 sd= 3.52K BT= 300.9K    MISR  0.54
+  4 O10903      72  -18.13  -17.47   126.90  0.493 sd= 3.28K BT= 302.2K   CERES  0.34
+  5 O10670      22   33.80   34.51   137.59  0.502 sd= 2.16K BT= 286.2K    MISR  0.21
+  6 O10670       2   44.39   45.08   140.83  0.506 sd= 4.07K BT= 253.9K   CERES  0.27
+  7 O10204      13   42.62   43.32   141.52  0.508 sd= 3.36K BT= 257.4K  MOPITT  0.18
+  8 O10903      11   29.93   30.64   137.65  0.517 sd= 4.72K BT= 287.7K  MOPITT  0.36
+  9 O11602       9   42.99   43.69   138.93  0.519 sd= 2.53K BT= 262.2K   CERES  0.18
+ 10 O11602      36  -20.52  -19.84   124.24  0.519 sd= 6.97K BT= 238.0K   CERES  0.27
+ 11 O11602      25   34.52   35.20   136.54  0.525 sd= 6.62K BT= 258.3K    MISR  0.44
+# wrote all_granule_ranking_filtered.json (268 blocks)
+=== vs ares
+orbit     ares aurora matched  max|dC5|   max|dW| ncell= weak= max|dSD|K
+O10204      32     32      32  0.00e+00  0.00e+00     32    32  0.00e+00
+O10670      52     52      52  5.76e-07  7.05e-07     52    52  0.00e+00
+O10903      75     75      75  0.00e+00  0.00e+00     75    75  0.00e+00
+O11136      27     27      27  0.00e+00  0.00e+00     27    27  0.00e+00
+O11369      66     66      66  0.00e+00  0.00e+00     66    66  0.00e+00
+O11602      49     49      49  0.00e+00  0.00e+00     49    49  0.00e+00
+O11835      14     14      14  0.00e+00  0.00e+00     14    14  0.00e+00
+# wrote /lus/flare/projects/IOWarp/hyoklee/tf_congruence/run_8917505/work/compare_ares.json
+=== runtime errors: 0
+[22:05:15 +2882s] done

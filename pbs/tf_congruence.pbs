@@ -1,0 +1,287 @@
+#!/bin/bash
+#PBS -N tf_congruence
+#PBS -l select=1
+#PBS -l walltime=03:00:00
+#PBS -l filesystems=home:flare
+#PBS -q capacity
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/tf_congruence.out
+#PBS -e /home/hyoklee/wrp/run/tf_congruence.err
+#
+# Terra Fusion 5-sensor congruence test on ONE Aurora node, as run on ares
+# (~/ares/doc parts 4, 17), with the granules fetched from S3 by CAE instead of
+# read from local copies.
+#
+#   1. CLIO runtime: CTE over DRAM -> GPU HBM -> Lustre, plus the clio-fs
+#      chimods, and a clio_cte_fuse mount of that namespace.
+#   2. clio_cae imports each transfer of omni/terra_fusion.omni.yaml from
+#      s3://terrafusiondatasampler into a clio-fs file (cfs::), striped over
+#      CAE_S3_STREAMS concurrent ranged GETs.
+#   3. Each file is checked against S3 (size, plus first/last/random 1 MiB).
+#   4. As soon as a granule has landed, its congruence pipeline starts
+#      (src/tf/tf_granule.sh), reading it through the mount, regridding on its
+#      own GPU tile. Ingest of the next granule overlaps the analysis.
+#   5. All blocks are ranked (tf_rank_all.py, with the 2 K contrast floor) and
+#      compared block by block with the ares results (tf_compare_ares.py).
+#
+# Needs: ../bin/build_tf_aurora.pbs (clio-core branch aurora-tf-congruence),
+# the venv ${WORK}/venv-tf (frameworks + netCDF4) and pytaf in ${WORK}/pytaf.
+#
+# Overrides (qsub -v ...):
+#   GRANULES="O11835"     only these orbits (smoke test; use -q debug)
+#   HBM_GB / RAM_GB / DISK_GB   tier capacities (HBM_GB=0: no GPU tier)
+#   CAE_S3_STREAMS / CAE_S3_PART_MB   S3 striping (see the OMNI header)
+#   TF_REGRID=gpu|cpu     regrid device; CHECK_ORBIT also runs pytaf there
+#                         and records the agreement (default O10204)
+#   KEEP=1                keep the Lustre tier file after the job
+
+set -eo pipefail
+WORK=/lus/flare/projects/IOWarp/hyoklee
+BIN=${BIN:-${WORK}/build_tf_aurora/bin}
+OMNI=${OMNI:-/home/hyoklee/aurora/omni/terra_fusion.omni.yaml}
+TF=${TF:-/home/hyoklee/aurora/src/tf}
+ARES=${ARES:-/home/hyoklee/ares/data}
+VENV=${VENV:-${WORK}/venv-tf}
+PYTAF_DIR=${PYTAF_DIR:-${WORK}/pytaf}
+GRANULES=${GRANULES:-}
+RAM_GB=${RAM_GB:-320}    # 1.1 TB DRAM; holds all 304 GB of granules
+HBM_GB=${HBM_GB:-48}     # overflow; one PVC tile is 64 GB, the regrid needs a few
+DISK_GB=${DISK_GB:-400}  # Lustre overflow (IOWarp quota 1 TiB)
+TF_REGRID=${TF_REGRID:-gpu}
+CHECK_ORBIT=${CHECK_ORBIT:-O10204}
+# 16 x 32 MiB measured best (111 MB/s; 8 x 16 MiB 104, 1 stream 33).
+export CAE_S3_STREAMS=${CAE_S3_STREAMS:-16}
+export CAE_S3_PART_MB=${CAE_S3_PART_MB:-32}
+JOBID=${PBS_JOBID%%.*}
+CLIO_ROOT=${CLIO_ROOT:-${WORK}/tf_congruence}
+RUN=${RUN:-${CLIO_ROOT}/run_${JOBID:-manual}}
+MNT=/tmp/tf_mnt_${JOBID:-manual}
+ONEAPI=/opt/aurora/26.26.0/oneapi/compiler/latest   # what BIN was built with
+PROXY=http://proxy.alcf.anl.gov:3128
+BUCKET_URL=https://terrafusiondatasampler.s3.us-west-2.amazonaws.com
+
+mkdir -p "$RUN/omni" "$RUN/work" "$CLIO_ROOT/data"
+exec > >(tee -a "$RUN/job.log") 2>&1
+T0=$SECONDS
+ts() { echo "[$(date +%T) +$((SECONDS - T0))s] $*"; }
+ts "host=$(hostname) run=$RUN"
+ts "clio-core: $(git -C /home/hyoklee/clio-core.dev.wrk log --oneline -1)"
+
+# --- environment ------------------------------------------------------------
+# The CLIO processes get oneAPI 26.26 (their build); the Python pipeline gets
+# the frameworks module in a clean environment of its own, so neither loads the
+# other's libsycl / libhdf5.
+source "${ONEAPI}/env/vars.sh" > /dev/null 2>&1
+export CLIO_SERVER_CONF=${RUN}/clio_server.yaml
+export CLIO_MEMFD_DIR=/tmp/clio_memfd_${JOBID:-manual}
+export CLIO_IPC_MODE=SHM
+export AWS_NO_SIGN_REQUEST=1 AWS_DEFAULT_REGION=us-west-2
+export http_proxy=$PROXY https_proxy=$PROXY no_proxy=localhost,127.0.0.1
+export CTP_LOG_LEVEL=${CTP_LOG_LEVEL:-warning}
+mkdir -p "$CLIO_MEMFD_DIR"
+cat > "${RUN}/pyenv.sh" <<'EOF'
+#!/bin/bash -l
+# Run "$@" with the frameworks module loaded (PyTorch XPU, numpy, scipy).
+module load frameworks/2026.1.0 > /dev/null 2>&1
+exec "$@"
+EOF
+chmod +x "${RUN}/pyenv.sh"
+pyrun() {   # pyrun VAR=val ... -- cmd args
+    local vars=()
+    while [ "$1" != "--" ]; do vars+=("$1"); shift; done; shift
+    env -i HOME="$HOME" USER="$USER" PATH=/usr/bin:/bin TERM=dumb "${vars[@]}" \
+        bash -l "${RUN}/pyenv.sh" "$@"
+}
+
+# --- runtime config: CTE tiers + clio-fs ------------------------------------
+# Tier order, from tf_ingest_bench.pbs on a compute node (one 4.17 GB object,
+# through the proxy): ingest into DRAM ran at 104-111 MB/s, into GPU HBM at
+# 67-80 MB/s, and the reader (netCDF4 on the CPU, through FUSE) gains nothing
+# from device memory. So DRAM is the primary tier (it holds all 304 GB), HBM
+# the overflow, Lustre the last resort; the GPUs do the regrid instead.
+storage="
+      - path: \"ram::tf_ram\"
+        bdev_type: \"ram\"
+        capacity_limit: \"${RAM_GB}GB\"
+        score: 1.0"
+if [ "$HBM_GB" -gt 0 ]; then storage+="
+      - path: \"hbm::tf_hbm\"
+        bdev_type: \"hbm\"
+        capacity_limit: \"${HBM_GB}GB\"
+        score: 0.6"; fi
+storage+="
+      - path: \"${CLIO_ROOT}/data/cte_lustre_tier.dat\"
+        bdev_type: \"file\"
+        capacity_limit: \"${DISK_GB}GB\"
+        score: 0.2
+        persistence_level: \"temporary\""
+cat > "$CLIO_SERVER_CONF" <<EOF
+memory:
+  main_segment_size: auto
+  client_data_segment_size: 4GB
+networking:
+  port: ${CLIO_PORT:-9413}
+runtime:
+  num_threads: 16
+  queue_depth: 1024
+compose:
+  - mod_name: clio_cae_core
+    pool_name: cae_main
+    pool_query: local
+    pool_id: "400.0"
+    next_pool_id: "512.0"
+  - mod_name: clio_cte_core
+    pool_name: cte_main
+    pool_query: local
+    pool_id: "512.0"
+    storage:${storage}
+    dpe:
+      dpe_type: "max_bw"
+    performance:
+      # No periodic flush: by default the CTE copies volatile data down to the
+      # first persistent tier (here Lustre) every 10 s, which moved half of a
+      # granule out of HBM onto Lustre mid-ingest. These are cached copies of
+      # S3 objects; the Lustre tier is overflow only.
+      flush_data_period_ms: 0
+  - mod_name: clio_cte_cache
+    pool_name: clio_cte_cache
+    pool_query: local
+    pool_id: "563.0"
+    next_pool_id: "512.0"
+    min_score: 0.5
+  - mod_name: clio_cte_stream
+    pool_name: clio_cte_stream
+    pool_query: local
+    pool_id: "565.0"
+    next_pool_id: "563.0"
+    staging_pool_id: "512.0"
+  - mod_name: clio_cte_filesystem
+    pool_name: clio_cte_filesystem
+    pool_query: local
+    pool_id: "560.0"
+    next_pool_id: "563.0"
+EOF
+ts "tiers: hbm=${HBM_GB}GB ram=${RAM_GB}GB lustre=${DISK_GB}GB  S3 streams=${CAE_S3_STREAMS} x ${CAE_S3_PART_MB}MiB"
+
+RUNTIME_PID="" FUSE_PID=""
+cleanup() {
+    set +e
+    if [ -n "$FUSE_PID" ]; then
+        fusermount3 -u "$MNT" 2>/dev/null || fusermount3 -u -z "$MNT" 2>/dev/null
+        wait "$FUSE_PID" 2>/dev/null
+    fi
+    if [ -n "$RUNTIME_PID" ]; then
+        "${BIN}/clio_run" stop >> "${RUN}/runtime.log" 2>&1
+        wait "$RUNTIME_PID" 2>/dev/null
+    fi
+    rm -rf "${CLIO_MEMFD_DIR:?}"
+    [ "${KEEP:-0}" = 1 ] || rm -f "${CLIO_ROOT:?}"/data/cte_lustre_tier.dat*
+}
+trap cleanup EXIT
+
+"${BIN}/clio_run" start --fresh --disk "${CLIO_ROOT}/data" --no-viz > "${RUN}/runtime.log" 2>&1 &
+RUNTIME_PID=$!
+for _ in $(seq 1 90); do
+    "${BIN}/clio_run" status > /dev/null 2>&1 && break
+    kill -0 "$RUNTIME_PID" 2>/dev/null || { ts "ERROR: runtime exited; see runtime.log"; tail -20 "${RUN}/runtime.log"; exit 1; }
+    sleep 2
+done
+"${BIN}/clio_run" status > /dev/null 2>&1 || { ts "ERROR: runtime not up after 180 s"; exit 1; }
+ts "runtime up"
+grep -iE "HBM bdev|storage devices|Registered target" "${RUN}/runtime.log" | head -5 || true
+
+mkdir -p "$MNT"
+CLIO_WITH_RUNTIME=0 "${BIN}/clio_cte_fuse" "$MNT" -f -o max_threads=64 > "${RUN}/fuse.log" 2>&1 &
+FUSE_PID=$!
+for _ in $(seq 1 60); do
+    grep -q " $MNT " /proc/self/mountinfo && timeout 20 stat -f "$MNT" > /dev/null 2>&1 && break
+    sleep 1
+done
+grep -q " $MNT " /proc/self/mountinfo || { ts "ERROR: FUSE mount failed"; tail -20 "${RUN}/fuse.log"; exit 1; }
+ts "clio-fs mounted at $MNT"
+
+# --- split the OMNI file: one transfer each, so analysis can start per granule
+awk -v dir="${RUN}/omni" -v sel=" ${GRANULES} " '
+    /^transfers:/ { body = 1; next }
+    !body { next }
+    /^  - src:/ {
+        match($0, /TERRA_BF_L1B_O[0-9]+/); orbit = substr($0, RSTART + 13, RLENGTH - 13)
+        keep = (sel == "  ") || index(sel, " " orbit " ")
+        if (keep) { n++; out = sprintf("%s/%02d_%s.omni.yaml", dir, n, orbit); print "transfers:" > out }
+    }
+    keep && /^    |^  - / { print >> out }
+' "$OMNI"
+mapfile -t PARTS < <(ls "${RUN}"/omni/*.omni.yaml)
+[ "${#PARTS[@]}" -gt 0 ] || { ts "ERROR: no transfers selected from $OMNI"; exit 1; }
+ts "${#PARTS[@]} transfer(s) from $(basename "$OMNI")"
+
+# --- ingest, verify, analyse ------------------------------------------------
+verify_file() {   # verify_file <key> <file in mount>; returns non-zero on mismatch
+    local key=$1 f=$2 url="${BUCKET_URL}/$1"
+    local want got off n
+    want=$(curl -sfI -x "$PROXY" "$url" | tr -d '\r' | awk 'tolower($1)=="content-length:"{print $2}')
+    got=$(stat -c %s "$f" 2>/dev/null || echo -1)
+    [ "$want" = "$got" ] || { echo "size mismatch: s3=$want file=$got"; return 1; }
+    n=$((got / 1048576))
+    for off in 0 $((n - 1)) $((RANDOM * 32768 % n)) $((RANDOM * 32768 % n)) $((RANDOM * 32768 % n)); do
+        cmp -s <(curl -sf -x "$PROXY" -r $((off * 1048576))-$((off * 1048576 + 1048575)) "$url") \
+               <(dd if="$f" bs=1M skip="$off" count=1 status=none) \
+            || { echo "content mismatch in MiB $off"; return 1; }
+    done
+    echo "size $got OK, 5 x 1 MiB match S3"
+}
+
+declare -A APID
+tile=0
+INGEST_BYTES=0
+INGEST_SECS=0
+for part in "${PARTS[@]}"; do
+    src=$(awk -F'"' '/src:/{print $2}' "$part"); key=${src#s3://terrafusiondatasampler/}
+    dst=$(awk -F'"' '/dst:/{print $2}' "$part"); path=${dst#cfs::}
+    orbit=$(basename "$part" .omni.yaml); orbit=${orbit#*_}
+    t0=$SECONDS
+    set +e
+    "${BIN}/clio_cae" "$part" > "${RUN}/cae_${orbit}.log" 2>&1
+    rc=$?
+    set -e
+    dt=$((SECONDS - t0))
+    if [ $rc -ne 0 ]; then
+        ts "INGEST FAILED $orbit (clio_cae rc=$rc after ${dt}s); see cae_${orbit}.log"
+        grep -E "ERROR|FAILED" "${RUN}/runtime.log" | tail -3
+        continue
+    fi
+    sz=$(stat -c %s "${MNT}${path}" 2>/dev/null || echo 0)
+    INGEST_BYTES=$((INGEST_BYTES + sz)); INGEST_SECS=$((INGEST_SECS + dt))
+    ts "ingested $orbit: $((sz / 1000000)) MB in ${dt}s = $((sz / 1000000 / (dt > 0 ? dt : 1))) MB/s"
+    if ! v=$(verify_file "$key" "${MNT}${path}"); then
+        ts "VERIFY FAILED $orbit: $v -- not analysed"; continue
+    fi
+    ts "verified $orbit: $v"
+    "${BIN}/cte_tiers" 2>/dev/null | sed 's/^/    /' || true
+    regrid=$TF_REGRID; [ "$orbit" = "$CHECK_ORBIT" ] && regrid=check
+    pyrun PY="${VENV}/bin/python" TF="$TF" PYTAF_DIR="$PYTAF_DIR" TF_REGRID="$regrid" \
+          ZE_AFFINITY_MASK=$tile ZE_FLAT_DEVICE_HIERARCHY=FLAT -- \
+          bash "${TF}/tf_granule.sh" "${MNT}${path}" "${RUN}/work/${orbit}" &
+    APID[$orbit]=$!
+    ts "analysis of $orbit started on GPU tile $tile (regrid=$regrid)"
+    tile=$(((tile + 1) % 12))
+done
+ts "ingest done: $((INGEST_BYTES / 1000000)) MB in ${INGEST_SECS}s of clio_cae = $((INGEST_BYTES / 1000000 / (INGEST_SECS > 0 ? INGEST_SECS : 1))) MB/s"
+grep -E "CAE S3 (phase|keepalive) TOTAL" "${RUN}/runtime.log" | tail -2 || true
+
+for orbit in "${!APID[@]}"; do
+    if wait "${APID[$orbit]}"; then ts "analysis $orbit OK: $(tail -1 "${RUN}/work/${orbit}/run.log")"
+    else ts "analysis $orbit FAILED: $(grep '!!!' "${RUN}/work/${orbit}/run.log" | head -1)"; fi
+done
+
+# --- rank, compare with ares, report ----------------------------------------
+cd "${RUN}/work"
+pyrun ROOT="${RUN}/work" TOP=12 FLOOR=2.0 -- "${VENV}/bin/python" "${TF}/tf_rank_all.py" > "${RUN}/rank.log" 2>&1 || true
+pyrun ROOT="${RUN}/work" ARES="$ARES" -- "${VENV}/bin/python" "${TF}/tf_compare_ares.py" > "${RUN}/compare.log" 2>&1 || true
+echo "=== stage times (s) per granule"
+for d in "${RUN}"/work/O*; do echo "$(basename "$d") $(tr -d '\n ' < "$d/stage_times.json" 2>/dev/null) $(tr -d '\n ' < "$d/timing_b31_WN.json" 2>/dev/null | cut -c1-160)"; done
+for f in "${RUN}"/work/O*/regrid_check_b31_WN.json; do [ -f "$f" ] && echo "regrid check $(basename "$(dirname "$f")"): $(tr -d '\n ' < "$f")"; done
+echo "=== ranking";  sed -n '1,60p' "${RUN}/rank.log"
+echo "=== vs ares";  cat "${RUN}/compare.log"
+echo "=== runtime errors: $(grep -c ' ERROR ' "${RUN}/runtime.log" || true)"
+ts "done"

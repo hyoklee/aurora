@@ -1,0 +1,64 @@
+# OMNI
+name: terra_fusion
+tags: aws,terrafusion,public-data
+
+# The Terra Fusion congruence study's granule set: the same ten P108 granules
+#   ares analysed from local copies (~/ares/doc, parts 17-18), here fetched from
+#   the AWS Open Data bucket s3://terrafusiondatasampler (us-west-2, public).
+#   10 objects, 304.3 GB. Sizes in the comments are the bucket's; run
+#   ../pbs/tf_congruence.pbs, which checks every file against them.
+#   Seven of the ten carry all five sensors; O1117 has no ASTER, O12068 only
+#   MISR + MOPITT, and O10437's ASTER strip is too short for CERES/MOPITT, so
+#   those three end the run as "excluded", as they did on ares.
+#   Largest first: the run analyses each granule as soon as it has landed, so
+#   the small ones finish the ingest and the analysis tail stays short.
+#
+# Destination: cfs::<path> -- a FILE in the clio-fs namespace, stored in the
+#   runtime's CTE tiers (DRAM, then GPU HBM, then Lustre; see the PBS script). A
+#   clio_cte_fuse mount shows it at <mount><path>, so the unchanged netCDF4
+#   pipeline reads it as a plain file. (iowarp::<tag> would store a tag of
+#   chunk_<n> blobs that no file API can open.) Needs clio-core branch
+#   aurora-tf-congruence, built with the filesystem chimod.
+#
+# Environment of the CLIO runtime, which runs the assimilator (region,
+# credentials and transfer tuning are not OMNI fields):
+#   AWS_DEFAULT_REGION=us-west-2
+#   AWS_NO_SIGN_REQUEST=1      public bucket: unsigned requests
+#   https_proxy=http://proxy.alcf.anl.gov:3128   (compute nodes)
+#   CAE_S3_STREAMS=16          ranged GETs per object in flight
+#   CAE_S3_PART_MB=32          bytes per ranged GET
+#     Measured on a compute node through the proxy (one 4.17 GB object into
+#     DRAM): 1 stream 33 MB/s, 8 x 16 MiB 104 MB/s, 16 x 32 MiB 111 MB/s --
+#     ~46 min for these 304 GB instead of ~2.6 h.
+
+transfers:
+  - src: "s3://terrafusiondatasampler/P108/TERRA_BF_L1B_O10903_20020105010522_F000_V001.h5"   # 50,978,715,628 bytes
+    dst: "cfs::/terra_fusion/TERRA_BF_L1B_O10903_20020105010522_F000_V001.h5"
+    format: "binary"
+  - src: "s3://terrafusiondatasampler/P108/TERRA_BF_L1B_O11369_20020206010314_F000_V001.h5"   # 45,263,897,169 bytes
+    dst: "cfs::/terra_fusion/TERRA_BF_L1B_O11369_20020206010314_F000_V001.h5"
+    format: "binary"
+  - src: "s3://terrafusiondatasampler/P108/TERRA_BF_L1B_O10670_20011220010522_F000_V001.h5"   # 45,133,547,913 bytes
+    dst: "cfs::/terra_fusion/TERRA_BF_L1B_O10670_20011220010522_F000_V001.h5"
+    format: "binary"
+  - src: "s3://terrafusiondatasampler/P108/TERRA_BF_L1B_O11602_20020222010314_F000_V001.h5"   # 39,588,556,213 bytes
+    dst: "cfs::/terra_fusion/TERRA_BF_L1B_O11602_20020222010314_F000_V001.h5"
+    format: "binary"
+  - src: "s3://terrafusiondatasampler/P108/TERRA_BF_L1B_O10204_20011118010522_F000_V001.h5"   # 32,871,364,681 bytes
+    dst: "cfs::/terra_fusion/TERRA_BF_L1B_O10204_20011118010522_F000_V001.h5"
+    format: "binary"
+  - src: "s3://terrafusiondatasampler/P108/TERRA_BF_L1B_O11136_20020121010314_F000_V001.h5"   # 28,329,446,987 bytes
+    dst: "cfs::/terra_fusion/TERRA_BF_L1B_O11136_20020121010314_F000_V001.h5"
+    format: "binary"
+  - src: "s3://terrafusiondatasampler/P108/TERRA_BF_L1B_O11835_20020310010314_F000_V001.h5"   # 23,680,863,204 bytes
+    dst: "cfs::/terra_fusion/TERRA_BF_L1B_O11835_20020310010314_F000_V001.h5"
+    format: "binary"
+  - src: "s3://terrafusiondatasampler/P108/TERRA_BF_L1B_O10437_20011204010522_F000_V001.h5"   # 17,417,656,538 bytes
+    dst: "cfs::/terra_fusion/TERRA_BF_L1B_O10437_20011204010522_F000_V001.h5"
+    format: "binary"
+  - src: "s3://terrafusiondatasampler/P108/TERRA_BF_L1B_O1117_20000304011433_F000_V001.h5"   # 16,820,087,533 bytes
+    dst: "cfs::/terra_fusion/TERRA_BF_L1B_O1117_20000304011433_F000_V001.h5"
+    format: "binary"
+  - src: "s3://terrafusiondatasampler/P108/TERRA_BF_L1B_O12068_20020326010207_F000_V001.h5"   # 4,169,637,053 bytes
+    dst: "cfs::/terra_fusion/TERRA_BF_L1B_O12068_20020326010207_F000_V001.h5"
+    format: "binary"

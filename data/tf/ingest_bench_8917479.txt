@@ -1,0 +1,11 @@
+host=x4113c6s0b0n0
+hbm_GB streams  part_MB      secs     MB/s  placed
+host=x4503c5s5b0n0
+hbm_GB streams  part_MB      secs     MB/s  placed
+48     8        16           52.4       80  hbm::b_hbm_node0 free=47370MB ram::b_ram_node0 free=68720MB  rc=0
+0      8        16           39.9      104  ram::b_ram_node0 free=64550MB  rc=0
+0      16       16           46.0       91  ram::b_ram_node0 free=64550MB  rc=0
+0      16       32           37.6      111  ram::b_ram_node0 free=64550MB  rc=0
+0      32       16           37.6      111  ram::b_ram_node0 free=64550MB  rc=0
+48     16       16           62.1       67  hbm::b_hbm_node0 free=47370MB ram::b_ram_node0 free=68720MB  rc=0
+0      1        16          125.2       33  ram::b_ram_node0 free=64550MB  rc=0

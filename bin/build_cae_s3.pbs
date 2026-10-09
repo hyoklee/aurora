@@ -1,0 +1,137 @@
+#!/bin/bash
+#PBS -N build_cae_s3
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/build_cae_s3.out
+#PBS -e /home/hyoklee/wrp/run/build_cae_s3.err
+#
+# Build CAE from ~/clio-core.dev.wrk with S3 (s3://) import enabled.
+#
+# The existing ~/clio-core.dev/build_gpu tree has CLIO_CORE_ENABLE_CAE=OFF and
+# CAE_ENABLE_S3=OFF, so it has no clio_cae at all. CAE_ENABLE_S3 needs BOTH:
+#   - Poco (Net, NetSSL, Crypto) for the in-process assimilator read path --
+#     already in ~/miniconda3 (the Poco_DIR build_gpu uses);
+#   - the AWS SDK for C++ (component s3) for the out-of-process cae_s3_tool --
+#     not installed anywhere on Aurora, so step [1] builds it once.
+# CMake silently turns CAE_ENABLE_S3 back OFF if either is missing, so step
+# [3] checks the cache and fails the job instead of producing a non-S3 build.
+#
+# Usage:
+#   qsub build_cae_s3.pbs
+#   qsub -v CLIO_ENABLE_SYCL=ON build_cae_s3.pbs   # also build the SYCL parts
+#
+# SYCL is OFF by default: CAE does not need it, it multiplies build time, and
+# the macro kernels currently hit the IGC ICE (doc/ISSUE-igc-ice-*.md).
+
+set -eo pipefail
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+SRC=/home/hyoklee/clio-core.dev.wrk  # cae-s3-anonymous-inprocess (PR #1258)
+WORK=/lus/flare/projects/IOWarp/hyoklee
+BUILD=${WORK}/build_clio_core_dev_wrk_s3
+AWS_TAG=1.11.599
+AWS_SRC=${WORK}/deps/src/aws-sdk-cpp-${AWS_TAG}
+AWS_PREFIX=${WORK}/deps/aws-sdk-cpp-${AWS_TAG}
+POCO_DIR=/home/hyoklee/miniconda3/lib/cmake/Poco
+# Same dependency locations ~/clio-core.dev/build_gpu was configured with.
+CEREAL_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/cereal
+ZEROMQ_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/ZeroMQ
+MSGPACK_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/msgpack-c
+NLOHMANN_JSON_DIR=/home/hyoklee/miniconda3/share/cmake/nlohmann_json
+# No global -L/-rpath to envs/iowarp/lib (build_gpu has one): its libssl is
+# OpenSSL 3.6 and would be mixed with the system 3.5 libcrypto the AWS SDK
+# links, breaking cae_s3_tool. The *_DIR targets carry full paths + rpaths.
+# The empty -D values below also clear any cached old flags.
+CLIO_ENABLE_SYCL=${CLIO_ENABLE_SYCL:-OFF}
+LOG=/home/hyoklee/wrp/run/build_cae_s3_run.log
+
+# The GCC that icpx selects (icpx -v), so the SDK and CLIO share a libstdc++.
+GCC=/opt/aurora/26.26.0/spack/unified/1.1.1/install/linux-x86_64/gcc-14.3.0-siitp7a
+ONEAPI=/opt/aurora/26.26.0/oneapi/compiler/latest
+CMAKE=/home/hyoklee/miniconda3/bin/cmake
+JOBS=$(nproc)
+
+mkdir -p "$(dirname "$LOG")" "${WORK}/deps/src"
+: > "$LOG"
+exec > >(tee -a "$LOG") 2>&1
+echo "[$(date)] host=$(hostname) source HEAD: $(git -C "$SRC" log --oneline -1)"
+
+echo "=== [1] AWS SDK for C++ ${AWS_TAG} (s3 only) -> ${AWS_PREFIX} ==="
+if [ -f "${AWS_PREFIX}/lib/cmake/AWSSDK/AWSSDKConfig.cmake" ]; then
+    echo "already installed"
+else
+    if [ ! -d "$AWS_SRC" ]; then
+        git clone --depth 1 --branch "$AWS_TAG" --recurse-submodules \
+            --shallow-submodules https://github.com/aws/aws-sdk-cpp.git "$AWS_SRC"
+    fi
+    # CMAKE_POLICY_VERSION_MINIMUM: cmake 4.x rejects the <3.5 minimums some
+    # bundled CRT submodules still declare.
+    $CMAKE -S "$AWS_SRC" -B "${AWS_SRC}/build" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=${GCC}/bin/gcc \
+        -DCMAKE_CXX_COMPILER=${GCC}/bin/g++ \
+        -DCMAKE_INSTALL_PREFIX="$AWS_PREFIX" \
+        -DCMAKE_INSTALL_LIBDIR=lib \
+        -DCMAKE_INSTALL_RPATH="${AWS_PREFIX}/lib;${GCC}/lib64" \
+        -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+        -DBUILD_ONLY=s3 \
+        -DBUILD_SHARED_LIBS=ON \
+        -DENABLE_TESTING=OFF \
+        -DAUTORUN_UNIT_TESTS=OFF
+    $CMAKE --build "${AWS_SRC}/build" -j "$JOBS"
+    $CMAKE --install "${AWS_SRC}/build"
+fi
+
+echo "=== [2] Configure clio-core (CAE + S3, SYCL=${CLIO_ENABLE_SYCL}) -> ${BUILD} ==="
+$CMAKE -S "$SRC" -B "$BUILD" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_C_COMPILER=${ONEAPI}/bin/icx \
+    -DCMAKE_CXX_COMPILER=${ONEAPI}/bin/icpx \
+    -DCMAKE_PREFIX_PATH="${AWS_PREFIX}" \
+    -DCMAKE_BUILD_RPATH="${AWS_PREFIX}/lib" \
+    -DPoco_DIR="$POCO_DIR" \
+    -Dcereal_DIR="$CEREAL_DIR" \
+    -DZeroMQ_DIR="$ZEROMQ_DIR" \
+    -Dmsgpack-c_DIR="$MSGPACK_DIR" \
+    -Dnlohmann_json_DIR="$NLOHMANN_JSON_DIR" \
+    -DCMAKE_EXE_LINKER_FLAGS="" \
+    -DCMAKE_SHARED_LINKER_FLAGS="" \
+    -DCMAKE_MODULE_LINKER_FLAGS="" \
+    -DCLIO_CORE_ENABLE_CAE=ON \
+    -DCAE_ENABLE_S3=ON \
+    -DCLIO_CORE_ENABLE_SYCL=${CLIO_ENABLE_SYCL} \
+    -DCLIO_CTP_ENABLE_SYCL=${CLIO_ENABLE_SYCL} \
+    -DCLIO_CORE_ENABLE_TESTS=OFF
+
+echo "=== [3] Verify S3 survived configure ==="
+if ! grep -q '^CAE_ENABLE_S3:BOOL=ON' "${BUILD}/CMakeCache.txt"; then
+    echo "ERROR: CMake turned CAE_ENABLE_S3 OFF (AWS SDK or Poco not found);" \
+         "see the configure warnings above." >&2
+    exit 1
+fi
+echo "CAE_ENABLE_S3=ON"
+
+echo "=== [4] Build ==="
+$CMAKE --build "$BUILD" -j "$JOBS"
+
+echo "=== [5] Check binaries ==="
+for exe in clio_cae cae_s3_tool; do
+    test -x "${BUILD}/bin/${exe}" || { echo "ERROR: ${exe} not built" >&2; exit 1; }
+    echo "OK ${BUILD}/bin/${exe}"
+done
+
+echo "=== [6] Smoke test: anonymous 1 MiB ranged GET from the TerraFusion bucket ==="
+# terrafusiondatasampler is AWS Open Data (us-west-2, --no-sign-request).
+AWS_NO_SIGN_REQUEST=1 AWS_DEFAULT_REGION=us-west-2 "${BUILD}/bin/cae_s3_tool" get \
+    terrafusiondatasampler \
+    P108/TERRA_BF_L1B_O10204_20011118010522_F000_V001.h5 \
+    "${WORK}/terra_fusion/smoke.bin" 0 1048576
+ls -l "${WORK}/terra_fusion/smoke.bin"
+head -c 8 "${WORK}/terra_fusion/smoke.bin" | od -c | head -1   # expect \211 H D F
+rm -f "${WORK}/terra_fusion/smoke.bin"
+
+echo "[$(date)] Done. CAE with S3: ${BUILD}/bin/clio_cae"

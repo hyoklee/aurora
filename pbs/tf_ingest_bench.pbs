@@ -1,0 +1,106 @@
+#!/bin/bash
+#PBS -N tf_ingest_bench
+#PBS -l select=1
+#PBS -l walltime=00:45:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/tf_ingest_bench.out
+#PBS -e /home/hyoklee/wrp/run/tf_ingest_bench.err
+#
+# CAE S3 ingest rate on a compute node (through the ALCF proxy) for one object
+# into a cfs:: file, across tier and striping settings. Each cell gets a fresh
+# runtime. Picks the CAE_S3_STREAMS / CAE_S3_PART_MB / tier layout that
+# tf_congruence.pbs uses.
+#
+#   CELLS="hbm:streams:part_mb ..."   (hbm = HBM tier GB, 0 = RAM tier only)
+set -o pipefail
+WORK=/lus/flare/projects/IOWarp/hyoklee
+BIN=${BIN:-${WORK}/build_tf_aurora/bin}
+KEY=${KEY:-P108/TERRA_BF_L1B_O12068_20020326010207_F000_V001.h5}   # 4.17 GB
+CELLS=${CELLS:-"48:8:16 0:8:16 0:16:16 0:16:32 0:32:16 48:16:16 0:1:16"}
+R=${WORK}/tf_ingest_bench/run_${PBS_JOBID%%.*}
+mkdir -p "$R/data"
+source /opt/aurora/26.26.0/oneapi/compiler/latest/env/vars.sh > /dev/null 2>&1
+export CLIO_SERVER_CONF=$R/server.yaml CLIO_MEMFD_DIR=/tmp/clio_memfd_bench CLIO_IPC_MODE=SHM
+export AWS_NO_SIGN_REQUEST=1 AWS_DEFAULT_REGION=us-west-2 CTP_LOG_LEVEL=warning
+export http_proxy=http://proxy.alcf.anl.gov:3128 https_proxy=http://proxy.alcf.anl.gov:3128
+mkdir -p "$CLIO_MEMFD_DIR"
+cat > "$R/obj.omni.yaml" <<EOF
+transfers:
+  - src: "s3://terrafusiondatasampler/${KEY}"
+    dst: "cfs::/bench/obj.h5"
+    format: "binary"
+EOF
+echo "host=$(hostname)"
+printf '%-6s %-8s %-8s %8s %8s  %s\n' hbm_GB streams part_MB secs MB/s placed
+for cell in $CELLS; do
+    IFS=: read -r hbm streams part <<< "$cell"
+    storage=""
+    [ "$hbm" -gt 0 ] && storage+="
+      - path: \"hbm::b_hbm\"
+        bdev_type: \"hbm\"
+        capacity_limit: \"${hbm}GB\"
+        score: 1.0"
+    storage+="
+      - path: \"ram::b_ram\"
+        bdev_type: \"ram\"
+        capacity_limit: \"64GB\"
+        score: 0.6"
+    cat > "$CLIO_SERVER_CONF" <<EOF
+memory:
+  main_segment_size: auto
+  client_data_segment_size: 4GB
+networking:
+  port: 19613
+runtime:
+  num_threads: 16
+compose:
+  - mod_name: clio_cae_core
+    pool_name: cae_main
+    pool_query: local
+    pool_id: "400.0"
+    next_pool_id: "512.0"
+  - mod_name: clio_cte_core
+    pool_name: cte_main
+    pool_query: local
+    pool_id: "512.0"
+    storage:${storage}
+    dpe:
+      dpe_type: "max_bw"
+    performance:
+      flush_data_period_ms: 0
+  - mod_name: clio_cte_cache
+    pool_name: clio_cte_cache
+    pool_query: local
+    pool_id: "563.0"
+    next_pool_id: "512.0"
+    min_score: 0.5
+  - mod_name: clio_cte_stream
+    pool_name: clio_cte_stream
+    pool_query: local
+    pool_id: "565.0"
+    next_pool_id: "563.0"
+    staging_pool_id: "512.0"
+  - mod_name: clio_cte_filesystem
+    pool_name: clio_cte_filesystem
+    pool_query: local
+    pool_id: "560.0"
+    next_pool_id: "563.0"
+EOF
+    # The assimilator runs in the RUNTIME, so that is where the knobs go.
+    CAE_S3_STREAMS=$streams CAE_S3_PART_MB=$part \
+        "${BIN}/clio_run" start --fresh --disk "$R/data" --no-viz > "$R/rt_${cell//:/_}.log" 2>&1 &
+    rp=$!
+    for _ in $(seq 60); do "${BIN}/clio_run" status > /dev/null 2>&1 && break; sleep 1; done
+    t0=$(date +%s.%N)
+    "${BIN}/clio_cae" "$R/obj.omni.yaml" > "$R/cae_${cell//:/_}.log" 2>&1
+    rc=$?
+    t1=$(date +%s.%N)
+    placed=$("${BIN}/cte_tiers" 2>/dev/null | awk 'NR>1{printf "%s free=%.0fMB ", $1, $NF}')
+    "${BIN}/clio_run" stop > /dev/null 2>&1; wait $rp
+    secs=$(echo "$t1 - $t0" | bc)
+    printf '%-6s %-8s %-8s %8.1f %8.0f  %s rc=%s\n' "$hbm" "$streams" "$part" "$secs" \
+        "$(echo "4169.637 / $secs" | bc -l)" "$placed" "$rc"
+done
+rm -rf "${CLIO_MEMFD_DIR:?}"
