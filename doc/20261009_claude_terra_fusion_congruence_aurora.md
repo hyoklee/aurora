@@ -178,6 +178,47 @@ two-granule strip has no points from a sparse sensor. The script names MISR
 for O10437, where ares' prose said CERES/MOPITT. It is the same script on the
 same bytes, so the exclusion is the same.
 
+## All of P108 (follow-up, 2026-10-16, job 8934328, 8 nodes)
+
+The same pipeline over every P108 granule
+([`omni/terra_fusion_p108.omni.yaml`](../omni/terra_fusion_p108.omni.yaml), 361 granules, 11.75 TB),
+split over 8 nodes by [`pbs/tf_p108.pbs`](../pbs/tf_p108.pbs). Each granule is
+unlinked from clio-fs once it has been analysed. The 313 granules left after
+earlier runs (10.0 TB) were all imported and verified in 5 h 01 min, at 70–89 MB/s
+per node. That needed the clio-core S3 resume fix
+([iowarp/clio-core#1296](https://github.com/iowarp/clio-core/pull/1296)); without
+it, an earlier attempt failed 156 of 199 imports.
+
+| | |
+| --- | --- |
+| granules with results | 291 of 361. The other 70 lack a sensor group (ASTER 24, MOPITT 20, MISR 7, MODIS 2), lack ASTER TIR in one ASTER granule (12), or have no MISR points in the strip (2, plus O10437) |
+| blocks | 13,111; 10,116 above the 2.0 K contrast floor |
+| C5 | min 0.238, median 0.670, max 0.966; r = 0.989 with Kendall's W |
+| weakest-sensor tally | MISR 6,776, MOPITT 4,806, CERES 1,247, ASTER 228, MODIS 54 |
+| lowest above the floor | O26281 blk 45, 27.47°S–26.80°S, C5 = 0.332, BT₃₁ sd 4.33 K |
+
+Below are the most and least congruent blocks of the whole path, drawn by
+[`src/tf/tf_block_map.py`](../src/tf/tf_block_map.py). It rebuilds each block's
+fields exactly as `tf_congruence.py` does, and the recomputed C5 matches the
+ranking to 4 decimals. Each panel shows one sensor's rank z-score on the
+cells all sensors cover, sign-aligned to the common mode, on one shared scale.
+Congruent sensors therefore show the same pattern.
+
+**Most congruent: O33737 block 13, C5 = 0.966.** Off Shizuoka, Japan (Suruga Bay and the Izu Peninsula)
+(34.3–35.0°N, 138.1–139.1°E). ASTER, MODIS, MISR and MOPITT all show the same
+cold-north / warm-south split (BT₃₁ 244 K, sd 13.7 K, likely a cloud edge).
+The block has no CERES points, so C5 here is over 4 sensors.
+
+![Most congruent block, O33737 block 13](img/most_congruent_O33737_blk13.png)
+
+**Least congruent: O18825 block 0, C5 = 0.238.** Canadian Arctic
+(81.6–82.5°N, 110.8–104.6°W). BT₃₁ sd is 0.19 K, an almost uniform scene, so
+ASTER and MISR show mostly noise. Only MODIS has a gradient (loading 0.68);
+MOPITT is the weakest (0.15). The block falls below the 2 K floor, so the low
+score reflects missing contrast, not sensors disagreeing about a real signal.
+
+![Least congruent block, O18825 block 0](img/least_congruent_O18825_blk0.png)
+
 ## Caveats
 
 * **O10670's 5.8e-7 is not explained.** Only O10204 ran in check mode, and
@@ -201,6 +242,8 @@ qsub bin/build_tf_aurora.pbs                    # ~10 min, debug queue
 qsub pbs/tf_congruence.pbs                      # 48 min; capacity queue
 qsub -q debug -l walltime=1:00:00 -v GRANULES=O11835,CHECK_ORBIT=O11835 pbs/tf_congruence.pbs   # 6 min smoke
 qsub pbs/tf_ingest_bench.pbs                    # striping x tier sweep
+qsub pbs/tf_p108.pbs                            # all of P108, 8 nodes, ~5 h
+python src/tf/tf_block_map.py <work>/O33737 13 P108/TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 out.png
 ```
 
 Python: frameworks/2026.1.0 plus a venv with netCDF4 (`/lus/flare/projects/IOWarp/hyoklee/venv-tf`),
