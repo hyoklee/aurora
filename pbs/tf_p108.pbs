@@ -1,0 +1,128 @@
+#!/bin/bash
+#PBS -N tf_p108
+#PBS -l select=8
+#PBS -l walltime=08:00:00
+#PBS -l filesystems=home:flare
+#PBS -q capacity
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/tf_p108.out
+#PBS -e /home/hyoklee/wrp/run/tf_p108.err
+#
+# Terra Fusion congruence over the whole P108 path (omni/terra_fusion_p108.omni.yaml,
+# 361 granules, 11.75 TB) on several nodes. 11.75 TB fits no node, so:
+#
+#   1. The transfers not already analysed (EXCLUDE_OMNI, default the ten of
+#      job 8917505) are split over the nodes, balanced by bytes, largest first.
+#   2. Every node runs pbs/tf_congruence.pbs on its share with DELETE_AFTER=1:
+#      each granule is unlinked from clio-fs when its analysis ends, and
+#      MAX_RUNNING holds the next ingest while that many analyses run, so
+#      at most MAX_RUNNING + 1 granules are resident on a node.
+#      Tiers per node: DRAM RAM_GB, GPU HBM HBM_GB (tile 0), Lustre DISK_GB.
+#   3. All nodes write per-granule results to one directory, which also links
+#      the earlier run's results, and one ranking covers all of P108.
+#
+# Overrides (qsub -v ...): EXCLUDE_OMNI, PRIOR_WORK, RAM_GB, HBM_GB, DISK_GB,
+#   MAX_RUNNING, CHECK_ORBIT, CAE_S3_STREAMS, LIMIT (first n transfers only,
+#   for a smoke run).
+#
+# PRIOR_WORK is a space-separated list of earlier work directories. An orbit
+# with a finished result there (contrast_b31_WN.json) is skipped and linked
+# into this run's ranking, so a resubmit picks up where a killed run stopped.
+# The default includes run 8932102 (killed after 38 granules by S3 failures).
+#
+# 8 streams per node, not tf_congruence.pbs's 16: 8 nodes x 16 streams through
+# the ALCF proxy failed far more often than one node did.
+
+set -eo pipefail
+AURORA=/home/hyoklee/aurora
+WORK=/lus/flare/projects/IOWarp/hyoklee
+OMNI_ALL=${OMNI_ALL:-${AURORA}/omni/terra_fusion_p108.omni.yaml}
+EXCLUDE_OMNI=${EXCLUDE_OMNI:-${AURORA}/omni/terra_fusion.omni.yaml}
+PRIOR_WORK=${PRIOR_WORK:-${WORK}/tf_congruence/run_8917505/work ${WORK}/tf_p108/run_8932102/work}
+VENV=${VENV:-${WORK}/venv-tf}
+JOBID=${PBS_JOBID%%.*}
+BASE=${BASE:-${WORK}/tf_p108/run_${JOBID:-manual}}
+NNODES=$(sort -u "${PBS_NODEFILE:-/dev/null}" | wc -l)
+[ "$NNODES" -gt 0 ] || NNODES=1
+export RAM_GB=${RAM_GB:-400} HBM_GB=${HBM_GB:-56} DISK_GB=${DISK_GB:-32}
+export MAX_RUNNING=${MAX_RUNNING:-6} CHECK_ORBIT=${CHECK_ORBIT:-O5544}
+export CAE_S3_STREAMS=${CAE_S3_STREAMS:-8}
+
+mkdir -p "$BASE/omni" "$BASE/work"
+exec > >(tee -a "$BASE/job.log") 2>&1
+T0=$SECONDS
+ts() { echo "[$(date +%T) +$((SECONDS - T0))s] $*"; }
+ts "nodes=$NNODES base=$BASE tiers: ram=${RAM_GB}GB hbm=${HBM_GB}GB lustre=${DISK_GB}GB max_running=$MAX_RUNNING"
+
+# --- split: remaining transfers, balanced by bytes (greedy, largest first) ---
+python3 -I - "$OMNI_ALL" "$EXCLUDE_OMNI" "$NNODES" "$BASE/omni" "${LIMIT:-0}" $PRIOR_WORK <<'EOF'
+import os, re, sys
+omni, exclude, n, out, limit = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], int(sys.argv[5])
+orbit = lambda s: re.search(r'TERRA_BF_L1B_(O\d+)_', s).group(1)
+done = {orbit(l) for l in open(exclude) if l.startswith('  - src:')}
+for w in sys.argv[6:]:
+    if os.path.isdir(w):
+        done |= {o for o in os.listdir(w) if os.path.isfile(f'{w}/{o}/contrast_b31_WN.json')}
+items, cur = [], None
+for line in open(omni):
+    if line.startswith('  - src:'):
+        cur = [line]; items.append(cur)
+    elif cur is not None and line.startswith('    '):
+        cur.append(line)
+size = lambda it: int(re.search(r'# ([\d,]+) bytes', it[0]).group(1).replace(',', ''))
+todo = [it for it in items if orbit(it[0]) not in done]
+if limit:
+    todo = todo[:limit]
+todo.sort(key=size, reverse=True)
+bins = [[0, []] for _ in range(n)]
+for it in todo:
+    b = min(bins, key=lambda b: b[0]); b[0] += size(it); b[1].append(it)
+for i, (tot, its) in enumerate(bins):
+    with open(f'{out}/node{i}.omni.yaml', 'w') as f:
+        f.write(f'# OMNI\nname: tf_p108_node{i}\n\ntransfers:\n')
+        for it in its:
+            f.writelines(it)
+    print(f'node{i}: {len(its)} granules, {tot / 1e9:,.1f} GB')
+print(f'total: {len(todo)} granules ({len(done)} excluded as already analysed), '
+      f'{sum(b[0] for b in bins) / 1e9:,.1f} GB')
+EOF
+
+# Earlier results join the ranking: every orbit dir of the first run (it
+# includes the data-condition failures), and the finished ones of later runs.
+for w in $PRIOR_WORK; do
+    for d in "$w"/O*; do
+        [ -d "$d" ] || continue
+        [ "$w" = "${PRIOR_WORK%% *}" ] || [ -f "$d/contrast_b31_WN.json" ] || continue
+        ln -sfn "$(readlink -f "$d")" "$BASE/work/$(basename "$d")"
+    done
+done
+
+# --- one tf_congruence.pbs per node ------------------------------------------
+ts "launching $NNODES node runs"
+set +e
+mpiexec -n "$NNODES" --ppn 1 bash -c '
+    i=${PALS_NODEID:-${PALS_RANKID:-${PMI_RANK:-0}}}
+    RUN='"$BASE"'/node$i CLIO_ROOT='"$BASE"'/node$i \
+    OMNI='"$BASE"'/omni/node$i.omni.yaml WORKDIR='"$BASE"'/work \
+    DELETE_AFTER=1 SKIP_REPORT=1 \
+    bash '"$AURORA"'/pbs/tf_congruence.pbs > /dev/null 2>&1'
+rc=$?
+set -e
+ts "node runs ended (mpiexec rc=$rc)"
+
+# --- summary and ranking -------------------------------------------------------
+for j in "$BASE"/node*/job.log; do
+    n=$(basename "$(dirname "$j")")
+    echo "$n: ingested $(grep -c '] ingested ' "$j") verified $(grep -c '] verified ' "$j")" \
+         "ok $(grep -c 'analysis O[0-9]* OK' "$j") failed $(grep -c 'analysis O[0-9]* FAILED' "$j")" \
+         "ingest-fail $(grep -c 'INGEST FAILED' "$j") verify-fail $(grep -c 'VERIFY FAILED' "$j")" \
+         "| $(grep 'ingest done' "$j" | sed 's/.*ingest done: //')"
+done
+echo "=== failure reasons (first line of each)"
+grep -h 'analysis O[0-9]* FAILED' "$BASE"/node*/job.log | sed 's/.*analysis //' | awk '{$1=""; print}' | sort | uniq -c | sort -rn
+cd "$BASE/work"
+env -i HOME="$HOME" USER="$USER" PATH=/usr/bin:/bin TERM=dumb ROOT="$BASE/work" TOP=12 FLOOR=2.0 \
+    bash -lc 'module load frameworks/2026.1.0 > /dev/null 2>&1; exec "$@"' _ \
+    "${VENV}/bin/python" "${AURORA}/src/tf/tf_rank_all.py" > "$BASE/rank.log" 2>&1 || true
+echo "=== ranking"; sed -n '1,40p' "$BASE/rank.log"
+ts "done"

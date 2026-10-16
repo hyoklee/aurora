@@ -31,9 +31,33 @@
 #   GRANULES="O11835"     only these orbits (smoke test; use -q debug)
 #   HBM_GB / RAM_GB / DISK_GB   tier capacities (HBM_GB=0: no GPU tier)
 #   CAE_S3_STREAMS / CAE_S3_PART_MB   S3 striping (see the OMNI header)
+#   CAE_S3_MAX_RESUMES / CAE_S3_BACKOFF_MS / CAE_S3_PART_RETRIES   S3 resume
+#                         budget, backoff and part retries (clio-core
+#                         fix/s3-resume-backoff; defaults 16 / 500 / 4)
 #   TF_REGRID=gpu|cpu     regrid device; CHECK_ORBIT also runs pytaf there
 #                         and records the agreement (default O10204)
 #   KEEP=1                keep the Lustre tier file after the job
+#   INGEST_TRIES=<n>      attempts per granule (default 3); a striped GET can
+#                         end short through the proxy (job 8932554, at 25.8 GB)
+#   WORKDIR=<dir>         per-granule results (default $RUN/work); tf_p108.pbs
+#                         points every node at one shared directory
+#   DELETE_AFTER=1        unlink each granule from clio-fs once its analysis
+#                         ends, so a set larger than the tiers can stream through
+#   MAX_RUNNING=<n>       hold the next ingest while n analyses run (default 12)
+#   UNLINK_CHECK=1        after the analyses, unlink every granule and print the
+#                         tiers, to show that unlink returns tier capacity
+#   RECHUNK=1             rechunk-on-ingest prototype: after each granule lands,
+#                         src/tf/tf_rechunk.py writes a rechunked copy into
+#                         clio-fs, and the pipeline runs on both, twice each, as
+#                         orig_full (production), orig_subset and rechunked
+#                         (both with TF_MISR_SUBSET=1); see rechunk_compare.
+#                         RECHUNK_INCLUDE=<paths> limits what is rechunked
+#   SKIP_REPORT=1         skip ranking and the ares comparison (tf_p108.pbs
+#                         ranks all nodes' results once at the end)
+#
+# With HBM_GB > 0 the HBM tier is one device allocation on the runtime's
+# default SYCL GPU (tile 0 under ZE_FLAT_DEVICE_HIERARCHY=FLAT), so analyses
+# use tiles 1-11 and leave tile 0 to the tier.
 
 set -eo pipefail
 WORK=/lus/flare/projects/IOWarp/hyoklee
@@ -49,18 +73,21 @@ HBM_GB=${HBM_GB:-48}     # overflow; one PVC tile is 64 GB, the regrid needs a f
 DISK_GB=${DISK_GB:-400}  # Lustre overflow (IOWarp quota 1 TiB)
 TF_REGRID=${TF_REGRID:-gpu}
 CHECK_ORBIT=${CHECK_ORBIT:-O10204}
+DELETE_AFTER=${DELETE_AFTER:-0}
+MAX_RUNNING=${MAX_RUNNING:-12}
 # 16 x 32 MiB measured best (111 MB/s; 8 x 16 MiB 104, 1 stream 33).
 export CAE_S3_STREAMS=${CAE_S3_STREAMS:-16}
 export CAE_S3_PART_MB=${CAE_S3_PART_MB:-32}
 JOBID=${PBS_JOBID%%.*}
 CLIO_ROOT=${CLIO_ROOT:-${WORK}/tf_congruence}
 RUN=${RUN:-${CLIO_ROOT}/run_${JOBID:-manual}}
+WORKDIR=${WORKDIR:-${RUN}/work}
 MNT=/tmp/tf_mnt_${JOBID:-manual}
 ONEAPI=/opt/aurora/26.26.0/oneapi/compiler/latest   # what BIN was built with
 PROXY=http://proxy.alcf.anl.gov:3128
 BUCKET_URL=https://terrafusiondatasampler.s3.us-west-2.amazonaws.com
 
-mkdir -p "$RUN/omni" "$RUN/work" "$CLIO_ROOT/data"
+mkdir -p "$RUN/omni" "$WORKDIR" "$CLIO_ROOT/data"
 exec > >(tee -a "$RUN/job.log") 2>&1
 T0=$SECONDS
 ts() { echo "[$(date +%T) +$((SECONDS - T0))s] $*"; }
@@ -161,19 +188,31 @@ compose:
     pool_id: "560.0"
     next_pool_id: "563.0"
 EOF
-ts "tiers: hbm=${HBM_GB}GB ram=${RAM_GB}GB lustre=${DISK_GB}GB  S3 streams=${CAE_S3_STREAMS} x ${CAE_S3_PART_MB}MiB"
+ts "tiers: hbm=${HBM_GB}GB ram=${RAM_GB}GB lustre=${DISK_GB}GB  S3 streams=${CAE_S3_STREAMS} x ${CAE_S3_PART_MB}MiB resumes=${CAE_S3_MAX_RESUMES:-16} backoff=${CAE_S3_BACKOFF_MS:-500}ms part_retries=${CAE_S3_PART_RETRIES:-4}"
 
-RUNTIME_PID="" FUSE_PID=""
+RUNTIME_PID="" FUSE_PID="" SAMPLER_PID=""
+# Every step is bounded and logged: job 8934120 reached "done" at +926 s and
+# then held its node for 40 more minutes somewhere in here.
+wait_or_kill() {   # wait_or_kill <pid> <seconds> <what>
+    local i
+    for ((i = 0; i < $2; i++)); do kill -0 "$1" 2>/dev/null || return 0; sleep 1; done
+    ts "cleanup: $3 still running after $2 s; killing it"
+    kill -9 "$1" 2>/dev/null
+}
 cleanup() {
     set +e
+    [ -n "$SAMPLER_PID" ] && kill "$SAMPLER_PID" 2>/dev/null
     if [ -n "$FUSE_PID" ]; then
-        fusermount3 -u "$MNT" 2>/dev/null || fusermount3 -u -z "$MNT" 2>/dev/null
-        wait "$FUSE_PID" 2>/dev/null
+        ts "cleanup: unmounting clio-fs"
+        timeout 60 fusermount3 -u "$MNT" 2>/dev/null || fusermount3 -u -z "$MNT" 2>/dev/null
+        wait_or_kill "$FUSE_PID" 60 clio_cte_fuse
     fi
     if [ -n "$RUNTIME_PID" ]; then
-        "${BIN}/clio_run" stop >> "${RUN}/runtime.log" 2>&1
-        wait "$RUNTIME_PID" 2>/dev/null
+        ts "cleanup: stopping the runtime"
+        timeout 120 "${BIN}/clio_run" stop >> "${RUN}/runtime.log" 2>&1
+        wait_or_kill "$RUNTIME_PID" 60 clio_run
     fi
+    ts "cleanup: removing tier files"
     rm -rf "${CLIO_MEMFD_DIR:?}"
     [ "${KEEP:-0}" = 1 ] || rm -f "${CLIO_ROOT:?}"/data/cte_lustre_tier.dat*
 }
@@ -199,6 +238,17 @@ for _ in $(seq 1 60); do
 done
 grep -q " $MNT " /proc/self/mountinfo || { ts "ERROR: FUSE mount failed"; tail -20 "${RUN}/fuse.log"; exit 1; }
 ts "clio-fs mounted at $MNT"
+
+# Host memory and tier occupancy once a minute: MemAvailable, page cache, shmem
+# (the memfd-backed DRAM tier), and each tier's free MB.
+(
+    while :; do
+        echo "$(date +%T) $(awk '/^(MemTotal|MemAvailable|Cached|Shmem):/{printf "%s=%dGB ", $1, $2/1048576}' /proc/meminfo)" \
+             "$("${BIN}/cte_tiers" 2>/dev/null | awk 'NR>1{n=split($1,a,"/"); printf "%s=%dMB ", a[n], $NF}')"
+        sleep 60
+    done
+) > "${RUN}/mem.log" 2>&1 &
+SAMPLER_PID=$!
 
 # --- split the OMNI file: one transfer each, so analysis can start per granule
 awk -v dir="${RUN}/omni" -v sel=" ${GRANULES} " '
@@ -231,18 +281,87 @@ verify_file() {   # verify_file <key> <file in mount>; returns non-zero on misma
     echo "size $got OK, 5 x 1 MiB match S3"
 }
 
+rechunk_compare() {   # rechunk_compare <orbit> <granule in mount>
+    local orbit=$1 f=$2 r t0 pass var file sub x
+    local name; name=$(basename "$f")
+    local tmpd=/tmp/rechunk_${JOBID:-manual}
+    r="${MNT}/terra_fusion/rechunked/${name}"
+    mkdir -p "$(dirname "$r")" "$tmpd"
+    # A: written by HDF5 straight into clio-fs (the rechunk-on-ingest shape).
+    t0=$SECONDS
+    pyrun RECHUNK_INCLUDE="${RECHUNK_INCLUDE:-}" -- "${VENV}/bin/python" "${TF}/tf_rechunk.py" "$f" "$r" \
+        > "${RUN}/rechunk_${orbit}.json" 2> "${RUN}/rechunk_${orbit}.err" \
+        || { ts "RECHUNK FAILED $orbit; see rechunk_${orbit}.err"; tail -5 "${RUN}/rechunk_${orbit}.err"; return 1; }
+    ts "rechunked $orbit into clio-fs in $((SECONDS - t0))s: $(cut -c1-600 "${RUN}/rechunk_${orbit}.json")"
+    # RECHUNK_DIAG=1 -- B: the same transcode into node-local /tmp, then C: cp of
+    # B into clio-fs. A vs B separates "HDF5 writing through FUSE" from the file
+    # format; C vs B separates it from plain sequential writes. Job 8932619:
+    # A == B == C byte for byte, so clio-fs stores HDF5 writes intact.
+    if [ "${RECHUNK_DIAG:-0}" = 1 ]; then
+    pyrun RECHUNK_INCLUDE="${RECHUNK_INCLUDE:-}" -- "${VENV}/bin/python" "${TF}/tf_rechunk.py" "$f" "$tmpd/$name" > /dev/null 2>&1
+    cp "$tmpd/$name" "${r}.cp"
+    for x in "$r" "$tmpd/$name" "${r}.cp"; do
+        echo "    $(stat -c %s "$x") $(md5sum < "$x" | cut -c1-12) $x"
+    done
+    cmp "$r" "$tmpd/$name" > /dev/null && ts "A == B: HDF5-through-FUSE file matches /tmp" || ts "A != B: $(cmp "$r" "$tmpd/$name" 2>&1 | head -1)"
+    cmp "${r}.cp" "$tmpd/$name" > /dev/null && ts "C == B: cp into clio-fs reads back intact" || ts "C != B: $(cmp "${r}.cp" "$tmpd/$name" 2>&1 | head -1)"
+    for x in "$r" "$tmpd/$name" "${r}.cp"; do
+        ts "open $(basename "$(dirname "$x")")/$(basename "$x"): $(pyrun -- "${VENV}/bin/python" -c "
+import sys, h5py, netCDF4
+p = sys.argv[1]; out = []
+for lib, op in (('h5py', lambda: h5py.File(p, 'r')['MISR/AN/Data_Fields/Red_Radiance'].chunks),
+                ('netCDF4', lambda: netCDF4.Dataset(p)['MISR']['AN']['Data_Fields']['Red_Radiance'].chunking())):
+    try: out.append(f'{lib} ok {op()}')
+    except Exception as e: out.append(f'{lib} FAIL {type(e).__name__}: {str(e)[:120]}')
+print(' | '.join(out))" "$x" 2>&1 | tail -1)"
+    done
+    # Run the pipeline on the clio-fs copy that opens (A, else C).
+    pyrun -- "${VENV}/bin/python" -c "import netCDF4,sys; netCDF4.Dataset(sys.argv[1])" "$r" > /dev/null 2>&1 || r="${r}.cp"
+    fi
+    ts "pipeline uses $r"
+    for pass in 1 2; do
+        for var in orig_full orig_subset rechunked; do
+            file=$f; sub=1
+            [ "$var" = rechunked ] && file=$r
+            [ "$var" = orig_full ] && sub=0
+            t0=$SECONDS
+            pyrun PY="${VENV}/bin/python" TF="$TF" PYTAF_DIR="$PYTAF_DIR" TF_REGRID="$TF_REGRID" \
+                  TF_MISR_SUBSET=$sub ZE_AFFINITY_MASK=1 ZE_FLAT_DEVICE_HIERARCHY=FLAT -- \
+                  bash "${TF}/tf_granule.sh" "$file" "${WORKDIR}/${var}_p${pass}/${orbit}" || true
+            ts "pass $pass $var: $((SECONDS - t0))s stages=$(tr -d '\n ' < "${WORKDIR}/${var}_p${pass}/${orbit}/stage_times.json")" \
+               "reads=$(grep -o '"read_[A-Z]*": [0-9.]*\|"MISR_blocks": [0-9]*' "${WORKDIR}/${var}_p${pass}/${orbit}"/sources_*.json 2>/dev/null | tr -d '"' | tr '\n' ' ')"
+        done
+    done
+    for var in orig_subset rechunked; do
+        for j in congruence_b31_WN.json contrast_b31_WN.json; do
+            if cmp -s "${WORKDIR}/orig_full_p2/${orbit}/$j" "${WORKDIR}/${var}_p2/${orbit}/$j"; then
+                ts "identical to orig_full: ${var} $j"
+            else ts "DIFFERS from orig_full: ${var} $j"; fi
+        done
+        pyrun ROOT="${WORKDIR}/${var}_p2" ARES="$ARES" -- "${VENV}/bin/python" "${TF}/tf_compare_ares.py" 2>&1 | grep -E "^orbit|^${orbit}" | sed "s/^/    [$var vs ares] /"
+    done
+}
+
 declare -A APID
-tile=0
+running() { local n=0 p; for p in "${APID[@]}"; do kill -0 "$p" 2>/dev/null && n=$((n + 1)); done; echo $n; }
+ntile=0
 INGEST_BYTES=0
 INGEST_SECS=0
 for part in "${PARTS[@]}"; do
     src=$(awk -F'"' '/src:/{print $2}' "$part"); key=${src#s3://terrafusiondatasampler/}
     dst=$(awk -F'"' '/dst:/{print $2}' "$part"); path=${dst#cfs::}
     orbit=$(basename "$part" .omni.yaml); orbit=${orbit#*_}
+    while [ "$(running)" -ge "$MAX_RUNNING" ]; do sleep 5; done
     t0=$SECONDS
     set +e
-    "${BIN}/clio_cae" "$part" > "${RUN}/cae_${orbit}.log" 2>&1
-    rc=$?
+    for try in $(seq 1 "${INGEST_TRIES:-3}"); do
+        "${BIN}/clio_cae" "$part" >> "${RUN}/cae_${orbit}.log" 2>&1
+        rc=$?
+        [ $rc -eq 0 ] && break
+        ts "ingest of $orbit failed (try $try, rc=$rc after $((SECONDS - t0))s); unlinking the partial file"
+        rm -f "${MNT}${path}"
+        sleep 10
+    done
     set -e
     dt=$((SECONDS - t0))
     if [ $rc -ne 0 ]; then
@@ -257,30 +376,47 @@ for part in "${PARTS[@]}"; do
         ts "VERIFY FAILED $orbit: $v -- not analysed"; continue
     fi
     ts "verified $orbit: $v"
+    if [ "${RECHUNK:-0}" = 1 ]; then rechunk_compare "$orbit" "${MNT}${path}" || true; continue; fi
     "${BIN}/cte_tiers" 2>/dev/null | sed 's/^/    /' || true
     regrid=$TF_REGRID; [ "$orbit" = "$CHECK_ORBIT" ] && regrid=check
-    pyrun PY="${VENV}/bin/python" TF="$TF" PYTAF_DIR="$PYTAF_DIR" TF_REGRID="$regrid" \
-          ZE_AFFINITY_MASK=$tile ZE_FLAT_DEVICE_HIERARCHY=FLAT -- \
-          bash "${TF}/tf_granule.sh" "${MNT}${path}" "${RUN}/work/${orbit}" &
+    if [ "$HBM_GB" -gt 0 ]; then tile=$((1 + ntile % 11)); else tile=$((ntile % 12)); fi
+    ntile=$((ntile + 1))
+    (
+        set +e   # a failed analysis must still release its granule
+        pyrun PY="${VENV}/bin/python" TF="$TF" PYTAF_DIR="$PYTAF_DIR" TF_REGRID="$regrid" \
+              ZE_AFFINITY_MASK=$tile ZE_FLAT_DEVICE_HIERARCHY=FLAT -- \
+              bash "${TF}/tf_granule.sh" "${MNT}${path}" "${WORKDIR}/${orbit}"
+        rc=$?
+        [ "$DELETE_AFTER" = 1 ] && rm -f "${MNT}${path}"
+        exit $rc
+    ) &
     APID[$orbit]=$!
     ts "analysis of $orbit started on GPU tile $tile (regrid=$regrid)"
-    tile=$(((tile + 1) % 12))
 done
 ts "ingest done: $((INGEST_BYTES / 1000000)) MB in ${INGEST_SECS}s of clio_cae = $((INGEST_BYTES / 1000000 / (INGEST_SECS > 0 ? INGEST_SECS : 1))) MB/s"
 grep -E "CAE S3 (phase|keepalive) TOTAL" "${RUN}/runtime.log" | tail -2 || true
 
 for orbit in "${!APID[@]}"; do
-    if wait "${APID[$orbit]}"; then ts "analysis $orbit OK: $(tail -1 "${RUN}/work/${orbit}/run.log")"
-    else ts "analysis $orbit FAILED: $(grep '!!!' "${RUN}/work/${orbit}/run.log" | head -1)"; fi
+    if wait "${APID[$orbit]}"; then ts "analysis $orbit OK: $(tail -1 "${WORKDIR}/${orbit}/run.log")"
+    else ts "analysis $orbit FAILED: $(grep '!!!' "${WORKDIR}/${orbit}/run.log" | head -1)"; fi
 done
+ts "tiers after the analyses:"; "${BIN}/cte_tiers" 2>/dev/null | sed 's/^/    /' || true
+
+if [ "${UNLINK_CHECK:-0}" = 1 ]; then
+    rm -f "${MNT}"/terra_fusion/*.h5
+    sleep 5
+    ts "tiers after unlinking every granule ($(ls "${MNT}/terra_fusion" 2>/dev/null | wc -l) files left):"
+    "${BIN}/cte_tiers" 2>/dev/null | sed 's/^/    /' || true
+fi
+[ "${SKIP_REPORT:-0}" = 1 ] && { echo "=== runtime errors: $(grep -c ' ERROR ' "${RUN}/runtime.log" || true)"; ts "done"; exit 0; }
 
 # --- rank, compare with ares, report ----------------------------------------
-cd "${RUN}/work"
-pyrun ROOT="${RUN}/work" TOP=12 FLOOR=2.0 -- "${VENV}/bin/python" "${TF}/tf_rank_all.py" > "${RUN}/rank.log" 2>&1 || true
-pyrun ROOT="${RUN}/work" ARES="$ARES" -- "${VENV}/bin/python" "${TF}/tf_compare_ares.py" > "${RUN}/compare.log" 2>&1 || true
+cd "${WORKDIR}"
+pyrun ROOT="${WORKDIR}" TOP=12 FLOOR=2.0 -- "${VENV}/bin/python" "${TF}/tf_rank_all.py" > "${RUN}/rank.log" 2>&1 || true
+pyrun ROOT="${WORKDIR}" ARES="$ARES" -- "${VENV}/bin/python" "${TF}/tf_compare_ares.py" > "${RUN}/compare.log" 2>&1 || true
 echo "=== stage times (s) per granule"
-for d in "${RUN}"/work/O*; do echo "$(basename "$d") $(tr -d '\n ' < "$d/stage_times.json" 2>/dev/null) $(tr -d '\n ' < "$d/timing_b31_WN.json" 2>/dev/null | cut -c1-160)"; done
-for f in "${RUN}"/work/O*/regrid_check_b31_WN.json; do [ -f "$f" ] && echo "regrid check $(basename "$(dirname "$f")"): $(tr -d '\n ' < "$f")"; done
+for d in "${WORKDIR}"/O*; do echo "$(basename "$d") $(tr -d '\n ' < "$d/stage_times.json" 2>/dev/null) $(tr -d '\n ' < "$d/timing_b31_WN.json" 2>/dev/null | cut -c1-160)"; done
+for f in "${WORKDIR}"/O*/regrid_check_b31_WN.json; do [ -f "$f" ] && echo "regrid check $(basename "$(dirname "$f")"): $(tr -d '\n ' < "$f")"; done
 echo "=== ranking";  sed -n '1,60p' "${RUN}/rank.log"
 echo "=== vs ares";  cat "${RUN}/compare.log"
 echo "=== runtime errors: $(grep -c ' ERROR ' "${RUN}/runtime.log" || true)"

@@ -95,8 +95,19 @@ gl = d['MISR']['Geolocation']
 la = np.asarray(gl['GeoLatitude'][:], 'f8'); lo = np.asarray(gl['GeoLongitude'][:], 'f8')
 m = ok(la, lo) & (la >= LA0) & (la <= LA1) & (lo >= LO0) & (lo <= LO1)
 rr = d['MISR']['AN']['Data_Fields']['Red_Radiance']      # single 755 MB chunk
-v = np.asarray(rr[:], 'f8')                              # must read the whole chunk
-v = v[:, ::4, ::4]   # (180,512,2048) radiance vs (180,128,512) geoloc
+if os.environ.get('TF_MISR_SUBSET', '0') == '1':
+    # Read only the SOM blocks the strip touches. On the original single chunk
+    # this inflates all 755 MB anyway; on a rechunked file ({1,512,2048}, see
+    # tf_rechunk.py) it inflates just those blocks. The values are the same.
+    bl = np.flatnonzero(m.any(axis=(1, 2)))
+    b0, b1 = (int(bl[0]), int(bl[-1]) + 1) if bl.size else (0, 0)
+    v = np.full(m.shape, np.nan)
+    if b1 > b0:
+        v[b0:b1] = np.asarray(rr[b0:b1], 'f8')[:, ::4, ::4]
+    T['MISR_blocks'] = b1 - b0
+else:
+    v = np.asarray(rr[:], 'f8')                          # must read the whole chunk
+    v = v[:, ::4, ::4]   # (180,512,2048) radiance vs (180,128,512) geoloc
 m &= vmask(rr, v)
 SRC['MISR'] = (la[m], lo[m], v[m]); T['read_MISR'] = time.time() - t
 
