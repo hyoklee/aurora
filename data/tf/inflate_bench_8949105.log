@@ -1,0 +1,55 @@
+[01:03:57 +0s] host=x4003c5s6b0n0 run=/lus/flare/projects/IOWarp/hyoklee/tf_inflate/run_8949105 granule=TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5
+=== node
+    Model name:                              Intel(R) Xeon(R) CPU Max 9470C
+    Thread(s) per core:                      2
+    Core(s) per socket:                      52
+    Socket(s):                               2
+    NUMA node(s):                            4
+    flags: amx_int8 amx_tile avx512f enqcmd movdir64b 
+    IAA/DSA/QAT PCI functions: 8
+      0000:e7:01.0 System peripheral [0880]: Intel Corporation Data Streaming Accelerator (DSA) [8086:0b25]
+      0000:ec:01.0 System peripheral [0880]: Intel Corporation Data Streaming Accelerator (DSA) [8086:0b25]
+      0000:f1:01.0 System peripheral [0880]: Intel Corporation Data Streaming Accelerator (DSA) [8086:0b25]
+      0000:f6:01.0 System peripheral [0880]: Intel Corporation Data Streaming Accelerator (DSA) [8086:0b25]
+      0001:e7:01.0 System peripheral [0880]: Intel Corporation Data Streaming Accelerator (DSA) [8086:0b25]
+      0001:ec:01.0 System peripheral [0880]: Intel Corporation Data Streaming Accelerator (DSA) [8086:0b25]
+      0001:f1:01.0 System peripheral [0880]: Intel Corporation Data Streaming Accelerator (DSA) [8086:0b25]
+      0001:f6:01.0 System peripheral [0880]: Intel Corporation Data Streaming Accelerator (DSA) [8086:0b25]
+    /dev/iax: ls: cannot access '/dev/iax': No such file or directory 
+    idxd driver loaded: 2  accel-config: none
+[01:03:58 +1s] fetching P108/TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 to /lus/flare/projects/IOWarp/hyoklee/tf_inflate/TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5
+29847863689 bytes in 254 s = 118 MB/s
+[01:08:16 +259s] granule: size 29847863689 OK, 5 x 1 MiB match S3
+[01:08:17 +260s] rechunking 3 oversized datasets the pipeline reads
+    MISR/AN/Data_Fields/Red_Radiance
+    MISR/Geolocation/GeoLatitude
+    MISR/Geolocation/GeoLongitude
+[01:09:22 +325s] rechunked in 65 s: {"src": "/lus/flare/projects/IOWarp/hyoklee/tf_inflate/TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5", "dst": "/lus/flare/projects/IOWarp/hyoklee/tf_inflate/rechunked_TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5", "copy_s": 46.1, "rechunk_s": 12.6, "scales_s": 5.6, "scale_links": 2929, "src_GB"
+[01:09:30 +333s] read TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 into the page cache: 29847 MB in 8 s
+[01:09:37 +340s] read rechunked_TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 into the page cache: 29850 MB in 7 s
+[01:09:37 +340s] page cache: 69 GB
+[01:10:10 +373s] pipeline orig_p1: 33 s {"blocks":2,"contrast":7,"congruence":13,"sources":10} read_MODIS: 4.5219151973724365 read_MISR: 4.246695518493652 read_CERES: 0.013016700744628906 read_MOPITT: 0.0019333362579345703  aster_read=2.713609218597412
+[01:10:40 +403s] pipeline rechunked_p1: 30 s {"blocks":1,"contrast":7,"congruence":12,"sources":10} read_MODIS: 4.52271294593811 read_MISR: 4.112361907958984 read_CERES: 0.012834787368774414 read_MOPITT: 0.002191305160522461  aster_read=2.7204208374023438
+[01:11:11 +434s] pipeline orig_p2: 31 s {"blocks":0,"contrast":7,"congruence":13,"sources":10} read_MODIS: 4.488662242889404 read_MISR: 4.218188762664795 read_CERES: 0.012845039367675781 read_MOPITT: 0.001932382583618164  aster_read=2.708889961242676
+[01:11:42 +465s] pipeline rechunked_p2: 31 s {"blocks":0,"contrast":7,"congruence":13,"sources":10} read_MODIS: 4.525597095489502 read_MISR: 4.1175501346588135 read_CERES: 0.013309001922607422 read_MOPITT: 0.002074718475341797  aster_read=2.715158224105835
+[01:11:42 +465s] congruence: rechunked identical to orig
+[01:12:28 +511s] inflate bench orig: 46 s
+[01:13:02 +545s] inflate bench rechunked: 34 s
+=== inflate benchmark (s): h5 = HDF5 read (read + inflate, 1 thread); raw = chunk read only
+--- orig  (208 cpus)  problems: none
+sensor  chunks   raw MB   out MB      h5    raw inflate   pool_8  pool_32 pool_104 max_chunk inflate/h5
+ASTER      105      334      544    2.22   0.04    2.13     0.36     0.23     0.21      0.03        96%
+CERES        0        0        0    0.00   0.00    0.00     0.00     0.00     0.00      0.00         0%
+MISR         3      295      849    2.88   0.10    2.76     2.23     2.22     2.22      2.22        96%
+MODIS       60      469      660    3.71   0.06    3.52     0.54     0.30     0.23      0.07        95%
+MOPITT       0        0        0    0.00   0.00    0.00     0.00     0.00     0.00      0.00         0%
+TOTAL      168     1098     2054    8.81   0.20    8.40     3.12     2.75     2.66      2.22        95%
+--- rechunked  (208 cpus)  problems: none
+sensor  chunks   raw MB   out MB      h5    raw inflate   pool_8  pool_32 pool_104 max_chunk inflate/h5
+ASTER      105      334      544    2.22   0.05    2.13     0.36     0.25     0.20      0.03        96%
+CERES        0        0        0    0.00   0.00    0.00     0.00     0.00     0.00      0.00         0%
+MISR       204      295      849    2.64   0.13    2.42     0.55     0.31     0.30      0.03        92%
+MODIS       60      469      660    3.68   0.06    3.52     0.59     0.29     0.24      0.07        96%
+MOPITT       0        0        0    0.00   0.00    0.00     0.00     0.00     0.00      0.00         0%
+TOTAL      369     1098     2054    8.54   0.23    8.08     1.50     0.85     0.74      0.07        95%
+[01:13:02 +545s] done

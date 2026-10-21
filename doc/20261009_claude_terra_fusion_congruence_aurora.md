@@ -270,6 +270,68 @@ Against Polaris:
   A100s, and the P108 run used them in parallel; node throughput was not
   measured here.
 
+## Where the read time goes: deflate (follow-up, 2026-10-21, job 8949105, 1 node)
+
+With the regrid on the GPU, the CPU-side reads are the floor. This run asks how
+much of them is deflate, and how much of that parallel inflate on the CPU
+recovers, before anything is built for GPU decompression (option D in the
+Polaris plan). [`pbs/tf_inflate_bench.pbs`](../pbs/tf_inflate_bench.pbs)
+fetched O33737 to Lustre (118 MB/s), made a copy with the three oversized
+datasets the pipeline reads rechunked to ≤ 4 MiB chunks (MISR `Red_Radiance`,
+`GeoLatitude`, `GeoLongitude`; 65 s), read both into the page cache, ran the
+pipeline twice on each, and ran
+[`src/tf/tf_inflate_bench.py`](../src/tf/tf_inflate_bench.py) on each. The
+benchmark reads the pipeline's datasets and selections three ways: through
+h5py, as raw chunks (`read_direct_chunk`), and as raw chunks inflated with
+zlib on 1 thread and in pools of 8, 32 and 104 threads. Results:
+[`data/tf/inflate_*_8949105.*`](../data/tf).
+
+| | Original | MISR rechunked |
+| --- | --- | --- |
+| HDF5 read of the pipeline's datasets | 8.81 s | 8.54 s |
+| … reading the compressed chunks | 0.20 s | 0.23 s |
+| … inflate, 1 thread | 8.40 s (95%) | 8.08 s |
+| Inflate, 8 threads | 3.12 s | 1.50 s |
+| Inflate, 104 threads | 2.66 s | **0.74 s** |
+| Slowest single chunk | 2.22 s (`Red_Radiance`) | 0.07 s |
+
+Per sensor (original file, 1 thread → 104 threads): ASTER 2.13 → 0.21 s
+(105 chunks), MODIS 3.52 → 0.23 s (60 chunks), MISR 2.76 → 2.22 s (3 chunks,
+one of them 755 MB). CERES and MOPITT are contiguous and cost nothing. Every
+inflated chunk had its full size and the spot-checked chunks matched h5py.
+
+* **Deflate is 95% of every HDF5 read.** Reading the compressed bytes from
+  memory is 0.2 s of 8.8 s.
+* **It parallelises well once no chunk is huge.** ASTER and MODIS already have
+  many chunks; MISR's single 755 MB chunk is the only obstacle, and
+  rechunking those three datasets removes it. 104 threads take inflate from
+  8.1 s to 0.74 s.
+* **Rechunking alone changes nothing.** The pipeline took 30–33 s per pass on
+  both files (identical congruence output), because HDF5 inflates chunks one
+  at a time. Same result as rechunk-on-ingest in the P108 run.
+* **In the pipeline**, one O33737 pass takes 31 s, and its reads account for
+  about 11.5 s (`read_MODIS` 4.5, `read_MISR` 4.2, ASTER 2.7; `contrast`
+  reads MODIS again). Parallel inflate could cut that to about 1 s: roughly
+  31 → 20 s, 1.5×. The rest is the regrid (3.9 s on PVC), four Python
+  start-ups with torch imports, and numpy.
+* **GPU decompression (option D) is not worth building for this pipeline.**
+  After 104-thread inflate there is at most ~0.7 s left for a GPU decoder to
+  save. On Aurora there is also no deflate hardware to use instead: the nodes
+  (Xeon Max 9470C) have 8 Intel DSA devices (`idxd` loaded), which copy and
+  compare memory, but no IAA (no `8086:0cfe`, no `/dev/iax`).
+* The pipeline read the granule from the Lustre page cache in 31 s, the same as
+  the clean passes through clio-fs from DRAM (job 8948568), so the FUSE path
+  costs nothing measurable here.
+
+The next step would be a parallel chunk reader for the large datasets
+(`read_direct_chunk` + thread-pooled zlib + assembly), checked against the
+current output block by block.
+
+The first attempt (job 8949071) never fetched the granule: `http_proxy` passed
+into the `bash -l` + `module load` Python environment arrives unset, so Python
+connected directly and timed out. The fetch now takes the proxy from
+`TF_FETCH_PROXY`.
+
 ## Caveats
 
 * **O10670's 5.8e-7 is not explained.** Only O10204 ran in check mode, and
@@ -295,6 +357,7 @@ qsub -q debug -l walltime=1:00:00 -v GRANULES=O11835,CHECK_ORBIT=O11835 pbs/tf_c
 qsub pbs/tf_ingest_bench.pbs                    # striping x tier sweep
 qsub pbs/tf_p108.pbs                            # all of P108, 8 nodes, ~5 h
 qsub -v OMNI=$PWD/omni/terra_fusion_p108.omni.yaml,GRANULES="O33737 O18825",HBM_GB=0,CLEAN_PASSES=2,SKIP_REPORT=1 pbs/tf_congruence.pbs   # PVC vs pytaf, 20 min
+qsub pbs/tf_inflate_bench.pbs                   # deflate share + parallel inflate, 10 min
 python src/tf/tf_block_map.py <work>/O33737 13 P108/TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 out.png
 ```
 

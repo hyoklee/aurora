@@ -1,0 +1,196 @@
+#!/bin/bash
+#PBS -N tf_inflate_bench
+#PBS -l select=1
+#PBS -l walltime=01:30:00
+#PBS -l filesystems=home:flare
+#PBS -q capacity
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/tf_inflate_bench.out
+#PBS -e /home/hyoklee/wrp/run/tf_inflate_bench.err
+#
+# Is deflate the floor of the Terra Fusion read path, and how much of it does
+# parallel inflate on the CPU recover? The first step before GPU decompression
+# (option D, ~/polaris/doc/20261016_claude_terra_fusion_congruence_polaris_plan.md).
+# One Aurora node, one granule (default O33737, whose clean-pass stage times
+# are known from job 8948568):
+#
+#   1. The node: CPU model, and whether Intel IAA / DSA / QAT devices exist
+#      (IAA inflates deflate in hardware, through QPL).
+#   2. The granule is fetched from S3 to Lustre (16 ranged GETs) unless already
+#      there, and checked against S3 (size + first/last/3 random 1 MiB).
+#   3. A copy with the pipeline's oversized datasets rechunked to <= 4 MiB
+#      chunks (src/tf/tf_rechunk.py), unless already there.
+#   4. Both files are read once into the page cache, so what follows measures
+#      inflate, not Lustre.
+#   5. The real pipeline (src/tf/tf_granule.sh, GPU regrid on tile 0) twice on
+#      each file: stage times and per-sensor read times.
+#   6. src/tf/tf_inflate_bench.py on each file: per sensor, HDF5 read vs raw
+#      chunk read vs zlib inflate on 1 thread and pooled on THREADS threads.
+#
+# Overrides (qsub -v ...): ORBIT_KEY (S3 key of the granule), THREADS
+# (default 8,32,104), PASSES (2), REFETCH=1 / RERECHUNK=1 (redo steps 2 / 3).
+# The two files stay in ${DATA} (about 60 GB) for reruns.
+
+set -eo pipefail
+WORK=/lus/flare/projects/IOWarp/hyoklee
+TF=${TF:-/home/hyoklee/aurora/src/tf}
+VENV=${VENV:-${WORK}/venv-tf}
+PYTAF_DIR=${PYTAF_DIR:-${WORK}/pytaf}
+ORBIT_KEY=${ORBIT_KEY:-P108/TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5}
+THREADS=${THREADS:-8,32,104}
+PASSES=${PASSES:-2}
+DATA=${DATA:-${WORK}/tf_inflate}
+JOBID=${PBS_JOBID%%.*}
+RUN=${RUN:-${DATA}/run_${JOBID:-manual}}
+PROXY=http://proxy.alcf.anl.gov:3128
+BUCKET_URL=https://terrafusiondatasampler.s3.us-west-2.amazonaws.com
+ORIG=${DATA}/$(basename "$ORBIT_KEY")
+RC=${DATA}/rechunked_$(basename "$ORBIT_KEY")
+
+mkdir -p "$RUN/work"
+exec > >(tee -a "$RUN/job.log") 2>&1
+T0=$SECONDS
+ts() { echo "[$(date +%T) +$((SECONDS - T0))s] $*"; }
+ts "host=$(hostname) run=$RUN granule=$(basename "$ORBIT_KEY")"
+
+cat > "${RUN}/pyenv.sh" <<'EOF'
+#!/bin/bash -l
+# Run "$@" with the frameworks module loaded (PyTorch XPU, numpy, h5py).
+module load frameworks/2026.1.0 > /dev/null 2>&1
+exec "$@"
+EOF
+chmod +x "${RUN}/pyenv.sh"
+pyrun() {   # pyrun VAR=val ... -- cmd args
+    local vars=()
+    while [ "$1" != "--" ]; do vars+=("$1"); shift; done; shift
+    env -i HOME="$HOME" USER="$USER" PATH=/usr/bin:/bin TERM=dumb "${vars[@]}" \
+        bash -l "${RUN}/pyenv.sh" "$@"
+}
+
+# --- 1. the node: CPU and deflate accelerators -------------------------------
+echo "=== node"
+lscpu | grep -E "^(Model name|Socket|Core|Thread|NUMA node\(s\))" | sed 's/^/    /'
+echo "    flags: $(grep -o -w -E 'avx512f|amx_tile|amx_int8|movdir64b|enqcmd' /proc/cpuinfo | sort -u | tr '\n' ' ')"
+# PCI ids: 8086:0cfe IAA, 8086:0b25 DSA, 8086:4940/4942/4944 QAT 4xxx.
+echo "    IAA/DSA/QAT PCI functions: $(lspci -nn 2>/dev/null | grep -c -E '8086:(0cfe|0b25|4940|4942|4944)' || true)"
+lspci -nn 2>/dev/null | grep -E '8086:(0cfe|0b25|4940|4942|4944)' | sed 's/^/      /' | head -8 || true
+echo "    /sys/bus/dsa devices: $(ls /sys/bus/dsa/devices 2>/dev/null | tr '\n' ' ' || true)"
+echo "    /dev/iax: $(ls /dev/iax 2>&1 | head -3 | tr '\n' ' ')"
+echo "    idxd driver loaded: $(lsmod 2>/dev/null | grep -c -w idxd || true)  accel-config: $(command -v accel-config || echo none)"
+
+# --- 2. fetch the granule ----------------------------------------------------
+verify_file() {   # verify_file <key> <file>; returns non-zero on mismatch
+    local key=$1 f=$2 url="${BUCKET_URL}/$1"
+    local want got off n
+    want=$(curl -sfI -x "$PROXY" "$url" | tr -d '\r' | awk 'tolower($1)=="content-length:"{print $2}')
+    got=$(stat -c %s "$f" 2>/dev/null || echo -1)
+    [ "$want" = "$got" ] || { echo "size mismatch: s3=$want file=$got"; return 1; }
+    n=$((got / 1048576))
+    for off in 0 $((n - 1)) $((RANDOM * 32768 % n)) $((RANDOM * 32768 % n)) $((RANDOM * 32768 % n)); do
+        cmp -s <(curl -sf -x "$PROXY" -r $((off * 1048576))-$((off * 1048576 + 1048575)) "$url") \
+               <(dd if="$f" bs=1M skip="$off" count=1 status=none) \
+            || { echo "content mismatch in MiB $off"; return 1; }
+    done
+    echo "size $got OK, 5 x 1 MiB match S3"
+}
+cat > "${RUN}/fetch.py" <<'EOF'
+# fetch.py <url> <dst> <streams>: ranged GETs written with pwrite, each part
+# resumed from where it stopped (up to 8 tries). The proxy comes from
+# TF_FETCH_PROXY: http_proxy passed through pyrun did not reach Python on a
+# compute node (job 8949071 connected directly and timed out).
+import os, sys, time, urllib.request
+from concurrent.futures import ThreadPoolExecutor
+url, dst, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+proxy = os.environ['TF_FETCH_PROXY']
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({'http': proxy, 'https': proxy}))
+size = int(opener.open(urllib.request.Request(url, method='HEAD'), timeout=60).headers['Content-Length'])
+fd = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644); os.ftruncate(fd, size)
+step = -(-size // n)
+def part(i):
+    a, end = i * step, min((i + 1) * step, size)
+    for _ in range(8):
+        try:
+            r = opener.open(urllib.request.Request(url, headers={'Range': f'bytes={a}-{end - 1}'}), timeout=120)
+            while a < end:
+                b = r.read(8 << 20)
+                if not b: break
+                os.pwrite(fd, b, a); a += len(b)
+            if a >= end: return
+        except Exception as e:
+            print(f'part {i} at {a}: {e}', flush=True); time.sleep(5)
+    raise SystemExit(f'part {i} incomplete at {a} of {end}')
+t = time.time()
+with ThreadPoolExecutor(n) as ex: list(ex.map(part, range(n)))
+os.close(fd)
+print(f'{size} bytes in {time.time() - t:.0f} s = {size / 1e6 / (time.time() - t):.0f} MB/s')
+EOF
+if [ "${REFETCH:-0}" = 1 ] || ! verify_file "$ORBIT_KEY" "$ORIG" > /dev/null 2>&1; then
+    ts "fetching $ORBIT_KEY to $ORIG"
+    pyrun TF_FETCH_PROXY=$PROXY -- "${VENV}/bin/python" -I "${RUN}/fetch.py" \
+        "${BUCKET_URL}/${ORBIT_KEY}" "$ORIG" 16
+fi
+v=$(verify_file "$ORBIT_KEY" "$ORIG") || { ts "VERIFY FAILED: $v"; exit 1; }
+ts "granule: $v"
+
+# --- 3. rechunked copy -------------------------------------------------------
+if [ "${RERECHUNK:-0}" = 1 ] || [ ! -s "$RC" ]; then
+    inc=$(pyrun -- "${VENV}/bin/python" "${TF}/tf_inflate_bench.py" --oversized "$ORIG")
+    ts "rechunking $(echo "$inc" | tr ',' '\n' | grep -c .) oversized datasets the pipeline reads"
+    echo "$inc" | tr ',' '\n' | sed 's/^/    /' | head -20
+    t0=$SECONDS
+    rm -f "$RC"
+    pyrun RECHUNK_INCLUDE="$inc" -- "${VENV}/bin/python" "${TF}/tf_rechunk.py" "$ORIG" "$RC" > "${RUN}/rechunk.json"
+    ts "rechunked in $((SECONDS - t0)) s: $(cut -c1-300 "${RUN}/rechunk.json")"
+fi
+
+# --- 4. page cache ------------------------------------------------------------
+for f in "$ORIG" "$RC"; do
+    t0=$SECONDS; cat "$f" > /dev/null
+    ts "read $(basename "$f") into the page cache: $(( $(stat -c %s "$f") / 1000000 )) MB in $((SECONDS - t0)) s"
+done
+ts "page cache: $(awk '/^Cached:/{printf "%d GB", $2/1048576}' /proc/meminfo)"
+
+# --- 5. the pipeline on both files --------------------------------------------
+for ((p = 1; p <= PASSES; p++)); do
+    for var in orig rechunked; do
+        f=$ORIG; [ "$var" = rechunked ] && f=$RC
+        w="${RUN}/work/${var}_p${p}"; t0=$SECONDS
+        pyrun PY="${VENV}/bin/python" TF="$TF" PYTAF_DIR="$PYTAF_DIR" TF_REGRID=gpu \
+              ZE_AFFINITY_MASK=0 ZE_FLAT_DEVICE_HIERARCHY=FLAT -- \
+              bash "${TF}/tf_granule.sh" "$f" "$w" || true
+        ts "pipeline ${var}_p${p}: $((SECONDS - t0)) s $(tr -d '\n ' < "$w/stage_times.json" 2>/dev/null)" \
+           "$(grep -o '"read_[A-Z]*": [0-9.]*' "$w"/sources_*.json 2>/dev/null | tr -d '"' | tr '\n' ' ')" \
+           "aster_read=$(grep -o '"aster_read_s": [0-9.]*' "$w"/timing_*.json 2>/dev/null | cut -d' ' -f2)"
+    done
+done
+for var in rechunked; do
+    cmp -s "${RUN}/work/orig_p1/congruence_b31_WN.json" "${RUN}/work/${var}_p1/congruence_b31_WN.json" \
+        && ts "congruence: $var identical to orig" || ts "congruence: $var DIFFERS from orig"
+done
+
+# --- 6. inflate benchmark -----------------------------------------------------
+for var in orig rechunked; do
+    f=$ORIG; [ "$var" = rechunked ] && f=$RC
+    t0=$SECONDS
+    pyrun THREADS="$THREADS" -- "${VENV}/bin/python" "${TF}/tf_inflate_bench.py" "$f" > "${RUN}/inflate_${var}.json" \
+        || ts "inflate bench $var FAILED"
+    ts "inflate bench $var: $((SECONDS - t0)) s"
+done
+
+echo "=== inflate benchmark (s): h5 = HDF5 read (read + inflate, 1 thread); raw = chunk read only"
+pyrun -- "${VENV}/bin/python" - "$RUN" <<'EOF'
+import json, sys
+run = sys.argv[1]
+for var in ('orig', 'rechunked'):
+    try: d = json.load(open(f'{run}/inflate_{var}.json'))
+    except Exception as e: print(var, 'missing:', e); continue
+    pools = [k for k in d['total'] if k.startswith('pool_') and k != 'pool_1_s']
+    print(f"--- {var}  ({d['cpus']} cpus)  problems: {d['problems'] or 'none'}")
+    print(f"{'sensor':7s} {'chunks':>6s} {'raw MB':>8s} {'out MB':>8s} {'h5':>7s} {'raw':>6s} {'inflate':>7s} "
+          + ' '.join(f'{k[:-2]:>8s}' for k in pools) + f" {'max_chunk':>9s} {'inflate/h5':>10s}")
+    for name, s in list(d['sensors'].items()) + [('TOTAL', d['total'])]:
+        print(f"{name:7s} {s['chunks']:6d} {s['raw_MB']:8.0f} {s['out_MB']:8.0f} {s['h5_s']:7.2f} {s['raw_s']:6.2f} "
+              f"{s['inflate_s']:7.2f} " + ' '.join(f'{s[k]:8.2f}' for k in pools)
+              + f" {s['max_chunk_s']:9.2f} {s['inflate_s'] / s['h5_s'] if s['h5_s'] else 0:10.0%}")
+EOF
+ts "done"
