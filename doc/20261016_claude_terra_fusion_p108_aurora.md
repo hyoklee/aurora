@@ -5,7 +5,8 @@ Runs on **Aurora**, 2026-10-15 to 2026-10-16. This extends the one-node,
 [20261009_claude_terra_fusion_congruence_aurora.md](20261009_claude_terra_fusion_congruence_aurora.md)
 (job 8917505) to every granule of WRS path 108 in `s3://terrafusiondatasampler`.
 The pipeline is the same one: S3 → CAE → CTE tiers → clio-fs FUSE → the
-unchanged netCDF4 scripts, with the regrid on a PVC tile.
+unchanged netCDF4 scripts, with the regrid on a PVC tile (PVC = Ponte Vecchio,
+the Intel Data Center GPU Max 1550; 6 per node, 2 tiles each).
 
 ## Headline
 

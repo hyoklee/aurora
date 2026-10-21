@@ -22,7 +22,9 @@ read from local copies.
   striping this run would take 2.6 h instead of 47 min.
 * **The GPU regrid matches pytaf bit for bit.** On O10204 (check mode),
   299,948 regridded cells were identical and 0 differed. Each granule ran on
-  its own PVC tile, and the regrid took 1.9–16.6 s per granule. A later
+  its own PVC tile (PVC = Ponte Vecchio, the Intel Data Center GPU Max 1550;
+  an Aurora node has 6 of them, each split into 2 tiles that run as separate
+  devices, so 12 tiles of 64 GB HBM per node), and the regrid took 1.9–16.6 s per granule. A later
   clean-pass run measured it **4.2–6.7× faster than pytaf** on Aurora's CPU
   (1.6–1.9× per granule), against 15.6–21.7× for an A100 on Polaris.
 * **Tier choice was set by measurement.** All data went to DRAM. Ingest into
