@@ -444,6 +444,59 @@ on top.
 
 One granule; no decoding ran on the PVC.
 
+## ZFP on CPU vs PVC (follow-up, 2026-10-21, job 8950872, 1 node)
+
+Neither Aurora nor upstream zfp has an Intel-GPU zfp (upstream has CUDA, and
+HIP on a branch; clio-core's `zfp-sycl` codec expects a SYCL libzfp at
+`/opt/zfp-sycl` that does not exist). The nodes also have no deflate hardware
+to fall back on: Intel's is IAA on the Xeon, absent here, and the PVC has no
+codec engine exposed to software.
+[`src/zfp_sycl/zfp_sycl.hpp`](../src/zfp_sycl/zfp_sycl.hpp) is a hand port of
+zfp's CUDA fixed-rate kernels (LLNL zfp develop 70fecac, BSD-3) to SYCL, for
+2-D float32 at rates that are multiples of 4 (every array the pipeline reads
+is 2-D once length-1 axes are dropped, and fixed rate is the only mode zfp's
+GPU backends implement). [`src/zfp_sycl/zfp_bench.cpp`](../src/zfp_sycl/zfp_bench.cpp)
+compresses and decompresses a simulated field (smooth, geolocation-like; or
+radiance-like with structure and 0.5% noise) with CPU libzfp (develop, built
+with OpenMP) and on one PVC tile, and requires every PVC stream and decoded
+array to match libzfp serial bit for bit; all 30 cases did. libzfp has no
+parallel decompression, so the 104-thread CPU decode gives each thread its own
+strip of block rows from the same stream. Run by
+[`pbs/zfp_cpu_gpu.pbs`](../pbs/zfp_cpu_gpu.pbs); results:
+[`data/tf/zfp_cpu_gpu_8950872.*`](../data/tf).
+
+GB/s of uncompressed data, radiance-like field, MISR size (2048 x 92160,
+755 MB); "+ copies" includes host↔device transfers from pinned memory:
+
+| Rate | Compress: CPU 104 thr | PVC kernel | PVC + copies | Decompress: CPU 104 thr | PVC kernel | PVC + copies |
+| --- | --- | --- | --- | --- | --- | --- |
+| 4 | 9.1 | 67.6 (7.4×) | 27.9 (3.0×) | 18.5 | 93.3 (5.0×) | 32.0 (1.7×) |
+| 8 | 6.4 | 50.4 (7.9×) | 23.2 (3.6×) | 12.5 | 74.7 (6.0×) | 27.6 (2.2×) |
+| 12 | 4.9 | 42.5 (8.6×) | 20.4 (4.1×) | 9.8 | 67.8 (6.9×) | 25.0 (2.6×) |
+| 16 | 4.0 | 36.4 (9.0×) | 18.1 (4.5×) | 8.1 | 63.0 (7.8×) | 23.0 (2.8×) |
+| 24 | 3.0 | 28.3 (9.6×) | 14.8 (5.0×) | 6.3 | 56.0 (8.9×) | 20.0 (3.2×) |
+
+One CPU thread does 0.12–0.4 GB/s.
+
+* **One PVC tile beats the whole 104-core node 6–9× on the kernel**, but the
+  copies to and from host memory cost more than the coding, so with them the
+  decode lead is 1.7–3.2×. The GPU wins clearly only when the decoded data
+  stays on it (e.g. feeding the PVC regrid).
+* **Small arrays favour the PVC more.** For one MODIS band (11 MB), 104 CPU
+  threads decode at about 2 GB/s (starting the threads is most of the work);
+  the PVC, copies included, at 17–28 GB/s.
+* **ZFP on the CPU already decodes 2–6× faster than deflate** (parallel zlib
+  inflate ran at about 2.8 GB/s in job 8949105).
+* **For Terra Fusion this changes nothing.** GPU decoding is fixed-rate,
+  lossy ZFP, which moved C5 by up to 0.004 (job 8950573), and the reads take
+  about 1 s with parallel inflate. It would pay where lossy coding is
+  acceptable and the consumer runs on the GPU.
+
+One tile of 12, simulated fields. The first run (job 8950765) had the same
+PVC numbers but set `OMP_PROC_BIND`: libgomp then pins the main thread to one
+core, the strip decoders inherit that mask, and 104 threads ran no faster than
+one. The job no longer sets it.
+
 ## Caveats
 
 * **O10670's 5.8e-7 is not explained.** Only O10204 ran in check mode, and
@@ -472,6 +525,7 @@ qsub -v OMNI=$PWD/omni/terra_fusion_p108.omni.yaml,GRANULES="O33737 O18825",HBM_
 qsub pbs/tf_inflate_bench.pbs                   # deflate share + parallel inflate, 10 min
 qsub pbs/tf_pread_test.pbs                      # TF_PREAD=0/1/check vs HEAD (needs tf_inflate_bench data), 8 min
 qsub pbs/tf_zfp_test.pbs                        # lossy/lossless ZFP vs congruence (needs tf_inflate_bench data), 12 min
+qsub pbs/zfp_cpu_gpu.pbs                        # zfp CPU vs PVC, simulated fields (needs CPU libzfp, see the job), 12 min
 python src/tf/tf_block_map.py <work>/O33737 13 P108/TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 out.png
 ```
 

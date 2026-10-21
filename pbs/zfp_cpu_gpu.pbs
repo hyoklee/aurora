@@ -1,0 +1,74 @@
+#!/bin/bash
+#PBS -N zfp_cpu_gpu
+#PBS -l select=1
+#PBS -l walltime=00:45:00
+#PBS -l filesystems=home:flare
+#PBS -q capacity
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/zfp_cpu_gpu.out
+#PBS -e /home/hyoklee/wrp/run/zfp_cpu_gpu.err
+#
+# Fixed-rate zfp on CPU (libzfp) vs one PVC tile (src/zfp_sycl, a SYCL port of
+# zfp's CUDA kernels), compressing and decompressing simulated 2-D float32
+# fields: src/zfp_sycl/zfp_bench.cpp. Sizes are the Terra Fusion arrays: one
+# MODIS EV_1KM band (1354 x 2030, 11 MB), a 268 MB square, and MISR
+# Red_Radiance as one 2-D array (2048 x 92160, 755 MB). Every PVC stream and
+# decoded array is checked bit for bit against libzfp serial.
+#
+# Needs CPU libzfp (develop 70fecac, OpenMP) in ${ZFP}; build it with
+#   cmake -S src -B build -DZFP_WITH_OPENMP=ON -DBUILD_TESTING=OFF \
+#         -DCMAKE_INSTALL_PREFIX=${ZFP} && cmake --build build && cmake --install build
+# Overrides (qsub -v ...): RATES ("4 8 12 16 24"), SIZES, FIELDS, REPS (5),
+# THREADS (104).
+
+set -eo pipefail
+WORK=/lus/flare/projects/IOWarp/hyoklee
+REPO=/home/hyoklee/aurora
+ZFP=${ZFP:-${WORK}/zfp-develop/install}
+RATES=${RATES:-4 8 12 16 24}
+SIZES=${SIZES:-1354x2030 8192x8192 2048x92160}
+FIELDS=${FIELDS:-smooth radiance}
+REPS=${REPS:-5}
+THREADS=${THREADS:-104}
+JOBID=${PBS_JOBID%%.*}
+RUN=${RUN:-${WORK}/zfp-bench/run_${JOBID:-manual}}
+mkdir -p "$RUN"
+exec > >(tee -a "$RUN/job.log") 2>&1
+T0=$SECONDS
+ts() { echo "[$(date +%T) +$((SECONDS - T0))s] $*"; }
+ts "host=$(hostname) run=$RUN head=$(git -C "$REPO" log --oneline -1)"
+ts "cpu: $(lscpu | sed -n 's/^Model name: *//p'), $(nproc) cpus"
+
+ONEAPI=${ONEAPI:-/opt/aurora/26.181.0/oneapi/compiler/latest}   # the 2026.1.0 the login nodes load
+source "${ONEAPI}/env/vars.sh" > /dev/null 2>&1
+icpx -fsycl -O3 -std=c++17 -I"$ZFP/include" "$REPO/src/zfp_sycl/zfp_bench.cpp" \
+     -L"$ZFP/lib64" -lzfp -Wl,-rpath,"$ZFP/lib64" -o "$RUN/zfp_bench"
+ts "built zfp_bench"
+
+export ONEAPI_DEVICE_SELECTOR=level_zero:gpu ZE_FLAT_DEVICE_HIERARCHY=FLAT ZE_AFFINITY_MASK=0
+unset OMP_PROC_BIND OMP_PLACES   # see zfp_bench.cpp: binding serialises the strip decoders
+for s in $SIZES; do
+    for k in $FIELDS; do
+        for r in $RATES; do
+            "$RUN/zfp_bench" "${s%x*}" "${s#*x}" "$r" "$k" "$REPS" "$THREADS" | tee -a "$RUN/results.jsonl" \
+                || ts "FAILED or mismatch: $s $k rate $r"
+        done
+        ts "done $s $k"
+    done
+done
+
+echo "=== GB/s of uncompressed data (median of $REPS); e2e = with host<->device copies"
+python3 - "$RUN/results.jsonl" <<'EOF'
+import json, sys
+R = [json.loads(l) for l in open(sys.argv[1]) if l.startswith('{')]
+print(f"{'size':>11} {'field':8} {'rate':>4} {'MB':>6} {'max_err':>9} | {'compress cpu1':>13} {'omp':>6} {'pvc':>6} {'pvc e2e':>7} |"
+      f" {'decompress cpu1':>15} {'strips':>6} {'pvc':>6} {'pvc e2e':>7} | bit-exact")
+for d in R:
+    c, x = d['compress_GBs'], d['decompress_GBs']
+    ok = all(d['match'].values())
+    print(f"{d['nx']:>5}x{d['ny']:<5} {d['field']:8} {d['rate']:4d} {d['MB']:6.0f} {d['max_err']:9.3g} |"
+          f" {c['cpu_1']:13.2f} {c['cpu_omp']:6.2f} {c['gpu_kernel']:6.1f} {c['gpu_e2e']:7.2f} |"
+          f" {x['cpu_1']:15.2f} {x['cpu_strips']:6.2f} {x['gpu_kernel']:6.1f} {x['gpu_e2e']:7.2f} | {ok}")
+print(f"device: {R[0]['device'] if R else '?'}, threads {R[0]['threads'] if R else '?'}")
+EOF
+ts "done"
