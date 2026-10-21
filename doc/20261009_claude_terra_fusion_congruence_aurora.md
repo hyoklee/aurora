@@ -22,7 +22,9 @@ read from local copies.
   striping this run would take 2.6 h instead of 47 min.
 * **The GPU regrid matches pytaf bit for bit.** On O10204 (check mode),
   299,948 regridded cells were identical and 0 differed. Each granule ran on
-  its own PVC tile, and the regrid took 1.9–16.6 s per granule.
+  its own PVC tile, and the regrid took 1.9–16.6 s per granule. A later
+  clean-pass run measured it **4.2–6.7× faster than pytaf** on Aurora's CPU
+  (1.6–1.9× per granule), against 15.6–21.7× for an A100 on Polaris.
 * **Tier choice was set by measurement.** All data went to DRAM. Ingest into
   DRAM measured 104–111 MB/s against 67–80 MB/s into GPU HBM, and the CPU-side
   reader gets nothing from data held in device memory. So HBM is the overflow
@@ -146,10 +148,10 @@ All of these read the granule through FUSE from DRAM. O11136 and O11835 ran
 while the next downloads were writing into the same runtime and were slowed by
 up to 17× (O11835's `sources` took 156 s here and 9 s in the smoke run). That
 contention is real but cheap: the last analysis still finished 3 s after the
-last download. **No CPU-only timing was taken on Aurora**, so no GPU-vs-pytaf
-speedup is claimed. The GPU is there to keep the regrid off the host while
-the host decompresses, and ares part 18 found decompression to be the actual
-floor.
+last download. No CPU-only timing was taken in this run; the GPU-vs-pytaf
+speedup was measured later (see [PVC vs pytaf](#pvc-vs-pytaf-regrid-follow-up-2026-10-20-job-8948568-1-node)).
+The GPU is there to keep the regrid off the host while the host decompresses,
+and ares part 18 found decompression to be the actual floor.
 
 ### The ranking (identical to ares part 17's 315-block re-run)
 
@@ -219,6 +221,53 @@ score reflects missing contrast, not sensors disagreeing about a real signal.
 
 ![Least congruent block, O18825 block 0](img/least_congruent_O18825_blk0.png)
 
+## PVC vs pytaf regrid (follow-up, 2026-10-20, job 8948568, 1 node)
+
+Polaris measured an A100 regrid 15.6–21.7× faster than pytaf on these two
+granules
+([~/polaris/doc](../../polaris/doc/20261016_claude_terra_fusion_congruence_polaris.md)).
+This run repeats that measurement on Aurora with `pbs/tf_congruence.pbs
+CLEAN_PASSES=2`. Both granules were ingested into DRAM (`HBM_GB=0`, as in
+Polaris run A, 83.5 GB at 108 MB/s). After the overlapped pass, each granule
+ran alone on PVC tile 1: two passes with the GPU regrid, then one with pytaf
+(1 OpenMP thread). Timings: [`data/tf/regrid_speedup_8948568.txt`](../data/tf/regrid_speedup_8948568.txt).
+
+| | O33737 | O18825 |
+| --- | --- | --- |
+| Regrid: pytaf, 1 thread (Xeon Max) | 26.0 s | 77.9 s |
+| Regrid: PVC tile (PyTorch XPU, float64) | 3.89 s | 18.36 s |
+| **Regrid speedup** | **6.7×** | **4.2×** |
+| Granule: pytaf regrid | 51 s | 120 s |
+| Granule: PVC regrid | 32 s | 64 s |
+| **End-to-end speedup** | **1.6×** | **1.9×** |
+
+C5 was identical in every pass, GPU and CPU: O33737 blk 13 = 0.9661 and
+O18825 blk 0 = 0.2376, weakest sensor MOPITT, as on Polaris. The two GPU
+passes agree within 0.1%.
+
+Against Polaris:
+
+| | Polaris | Aurora |
+| --- | --- | --- |
+| pytaf regrid, O33737 / O18825 | 72.9 / 219.1 s (EPYC 7543P) | 26.0 / 77.9 s (Xeon Max) |
+| GPU regrid, O33737 / O18825 | 3.36 / 14.1 s (A100) | 3.89 / 18.4 s (one PVC tile) |
+| Regrid speedup | 15.6–21.7× | 4.2–6.7× |
+| End-to-end speedup | 2.8–3.7× | 1.6–1.9× |
+| Granule with GPU regrid | 38 / 75 s | 32 / 64 s |
+
+* **The Intel GPU does speed up the regrid, but the gain is a third of
+  Polaris's.** The CPU baseline accounts for most of the gap: pytaf ran 2.8×
+  faster on Aurora than on Polaris. Whether that is the CPU or the pytaf build
+  was not checked. One PVC tile was 15–30% slower than an A100.
+* **Aurora is faster end to end**: 32 / 64 s per granule with the GPU regrid
+  against 38 / 75 s on Polaris.
+* **The CPU-side stages set the floor**, as on Polaris. With the regrid on
+  the GPU, `congruence` on O18825 still takes 36 s, of which 18 s is regrid;
+  `contrast` and `sources` (netCDF4 reads) do not change.
+* The comparison is per tile. An Aurora node has 12 tiles against Polaris's 4
+  A100s, and the P108 run used them in parallel; node throughput was not
+  measured here.
+
 ## Caveats
 
 * **O10670's 5.8e-7 is not explained.** Only O10204 ran in check mode, and
@@ -243,6 +292,7 @@ qsub pbs/tf_congruence.pbs                      # 48 min; capacity queue
 qsub -q debug -l walltime=1:00:00 -v GRANULES=O11835,CHECK_ORBIT=O11835 pbs/tf_congruence.pbs   # 6 min smoke
 qsub pbs/tf_ingest_bench.pbs                    # striping x tier sweep
 qsub pbs/tf_p108.pbs                            # all of P108, 8 nodes, ~5 h
+qsub -v OMNI=$PWD/omni/terra_fusion_p108.omni.yaml,GRANULES="O33737 O18825",HBM_GB=0,CLEAN_PASSES=2,SKIP_REPORT=1 pbs/tf_congruence.pbs   # PVC vs pytaf, 20 min
 python src/tf/tf_block_map.py <work>/O33737 13 P108/TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 out.png
 ```
 

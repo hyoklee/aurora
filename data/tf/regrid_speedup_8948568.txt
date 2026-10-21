@@ -1,0 +1,17 @@
+[21:19:28 +779s] ingest done: 83491 MB in 768s of clio_cae = 108 MB/s
+[21:21:04 +875s] gpu_p2 O18825: 64s {"blocks":1,"contrast":16,"congruence":36,"sources":10} {"regrid":"gpu","device":"xpu","blocks":78,"regrid_s":18.356842279434204,"aster_read_s":6.822376251220703,"total_s":33.30003786087036}
+[21:21:35 +906s] gpu_p2 O33737: 31s {"blocks":1,"contrast":7,"congruence":13,"sources":10} {"regrid":"gpu","device":"xpu","blocks":35,"regrid_s":3.8936288356781006,"aster_read_s":2.8452136516571045,"total_s":10.243835210800171}
+[21:22:38 +969s] gpu_p3 O18825: 63s {"blocks":0,"contrast":15,"congruence":36,"sources":11} {"regrid":"gpu","device":"xpu","blocks":78,"regrid_s":18.358863830566406,"aster_read_s":6.8366920948028564,"total_s":33.383636474609375}
+[21:23:10 +1001s] gpu_p3 O33737: 32s {"blocks":0,"contrast":7,"congruence":13,"sources":11} {"regrid":"gpu","device":"xpu","blocks":35,"regrid_s":3.8950564861297607,"aster_read_s":2.845250129699707,"total_s":10.244290113449097}
+[21:25:10 +1121s] cpu_p1 O18825: 120s {"blocks":1,"contrast":15,"congruence":94,"sources":10} {"regrid":"cpu","device":"None","blocks":78,"regrid_s":77.87905740737915,"aster_read_s":6.695207357406616,"total_s":92.46687412261963}
+[21:26:01 +1172s] cpu_p1 O33737: 51s {"blocks":0,"contrast":7,"congruence":33,"sources":10} {"regrid":"cpu","device":"None","blocks":35,"regrid_s":26.04512882232666,"aster_read_s":2.6978232860565186,"total_s":31.971921920776367}
+=== clean passes: PVC (PyTorch XPU) vs pytaf regrid, tile 1
+O18825 cpu_p1  device=None  regrid   77.88s  congruence.py   92.5s  granule 120s  blk 0 C5 0.2376 MOPITT
+O18825 gpu_p2  device=xpu   regrid   18.36s  congruence.py   33.3s  granule 64s  blk 0 C5 0.2376 MOPITT
+O18825 gpu_p3  device=xpu   regrid   18.36s  congruence.py   33.4s  granule 63s  blk 0 C5 0.2376 MOPITT
+O18825 speedup: regrid 77.9/18.36 = 4.2x, granule 120/64 = 1.9x
+O33737 cpu_p1  device=None  regrid   26.05s  congruence.py   32.0s  granule 51s  blk 13 C5 0.9661 MOPITT
+O33737 gpu_p2  device=xpu   regrid    3.89s  congruence.py   10.2s  granule 31s  blk 13 C5 0.9661 MOPITT
+O33737 gpu_p3  device=xpu   regrid    3.90s  congruence.py   10.2s  granule 32s  blk 13 C5 0.9661 MOPITT
+O33737 speedup: regrid 26.0/3.89 = 6.7x, granule 51/32 = 1.6x
+=== runtime errors: 0

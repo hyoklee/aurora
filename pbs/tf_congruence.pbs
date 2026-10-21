@@ -54,6 +54,14 @@
 #                         RECHUNK_INCLUDE=<paths> limits what is rechunked
 #   SKIP_REPORT=1         skip ranking and the ares comparison (tf_p108.pbs
 #                         ranks all nodes' results once at the end)
+#   CLEAN_PASSES=<n>      after the overlapped analyses, run each granule alone
+#                         n more times with the GPU regrid, then once with
+#                         pytaf (TF_REGRID=cpu), all on tile CLEAN_TILE
+#                         (default 1), into ${WORKDIR}/gpu_p<k> and cpu_p1, and
+#                         report PVC-vs-pytaf regrid and granule speedups: the
+#                         Polaris A100 comparison (~/polaris/doc). Default 0
+#                         (off). TF_TARGETS="O33737:13 O18825:0" prints those
+#                         blocks' C5 in every pass
 #
 # With HBM_GB > 0 the HBM tier is one device allocation on the runtime's
 # default SYCL GPU (tile 0 under ZE_FLAT_DEVICE_HIERARCHY=FLAT), so analyses
@@ -342,7 +350,7 @@ print(' | '.join(out))" "$x" 2>&1 | tail -1)"
     done
 }
 
-declare -A APID
+declare -A APID GPATH
 running() { local n=0 p; for p in "${APID[@]}"; do kill -0 "$p" 2>/dev/null && n=$((n + 1)); done; echo $n; }
 ntile=0
 INGEST_BYTES=0
@@ -376,6 +384,7 @@ for part in "${PARTS[@]}"; do
         ts "VERIFY FAILED $orbit: $v -- not analysed"; continue
     fi
     ts "verified $orbit: $v"
+    GPATH[$orbit]="${MNT}${path}"
     if [ "${RECHUNK:-0}" = 1 ]; then rechunk_compare "$orbit" "${MNT}${path}" || true; continue; fi
     "${BIN}/cte_tiers" 2>/dev/null | sed 's/^/    /' || true
     regrid=$TF_REGRID; [ "$orbit" = "$CHECK_ORBIT" ] && regrid=check
@@ -401,6 +410,55 @@ for orbit in "${!APID[@]}"; do
     else ts "analysis $orbit FAILED: $(grep '!!!' "${WORKDIR}/${orbit}/run.log" | head -1)"; fi
 done
 ts "tiers after the analyses:"; "${BIN}/cte_tiers" 2>/dev/null | sed 's/^/    /' || true
+
+# --- clean passes: one granule at a time, nothing else running ---------------
+# Pass 1 above overlaps ingest, which slowed every stage on Aurora and Polaris,
+# so the GPU-vs-pytaf comparison uses these instead.
+if [ "${CLEAN_PASSES:-0}" -gt 0 ] && [ "$DELETE_AFTER" != 1 ]; then
+    passes=()
+    for ((p = 2; p <= CLEAN_PASSES + 1; p++)); do passes+=("gpu_p$p:gpu"); done
+    passes+=("cpu_p1:cpu")
+    for pr in "${passes[@]}"; do
+        pass=${pr%%:*} regrid=${pr#*:}
+        for orbit in $(printf '%s\n' "${!GPATH[@]}" | sort); do
+            t0=$SECONDS
+            pyrun PY="${VENV}/bin/python" TF="$TF" PYTAF_DIR="$PYTAF_DIR" TF_REGRID="$regrid" \
+                  ZE_AFFINITY_MASK="${CLEAN_TILE:-1}" ZE_FLAT_DEVICE_HIERARCHY=FLAT -- \
+                  bash "${TF}/tf_granule.sh" "${GPATH[$orbit]}" "${WORKDIR}/${pass}/${orbit}" || true
+            echo $((SECONDS - t0)) > "${WORKDIR}/${pass}/${orbit}/wall_s"
+            ts "$pass $orbit: $((SECONDS - t0))s $(tr -d '\n ' < "${WORKDIR}/${pass}/${orbit}/stage_times.json" 2>/dev/null)" \
+               "$(tr -d '\n ' < "${WORKDIR}/${pass}/${orbit}/timing_b31_WN.json" 2>/dev/null | cut -c1-160)"
+        done
+    done
+    echo "=== clean passes: PVC (PyTorch XPU) vs pytaf regrid, tile ${CLEAN_TILE:-1}"
+    pyrun TF_TARGETS="${TF_TARGETS:-O33737:13 O18825:0}" -- "${VENV}/bin/python" - "${WORKDIR}" <<'EOF'
+import glob, json, os, statistics, sys
+root = sys.argv[1]
+targets = dict(t.split(':') for t in os.environ['TF_TARGETS'].split())
+def load(p):
+    try: return json.load(open(p))
+    except Exception: return None
+for orbit in sorted({os.path.basename(d) for d in glob.glob(f'{root}/*_p*/O*')}):
+    rows = {}
+    for d in sorted(glob.glob(f'{root}/*_p*/{orbit}')):
+        t = load(f'{d}/timing_b31_WN.json'); w = load(f'{d}/wall_s')
+        if t is None or w is None: continue
+        rows[os.path.basename(os.path.dirname(d))] = (t, w)
+        c5 = ''
+        if orbit in targets:
+            r = [b for b in load(f'{d}/congruence_b31_WN.json') or [] if b['blk'] == int(targets[orbit])]
+            c5 = f"  blk {targets[orbit]} C5 {r[0]['congruence']:.4f} {r[0]['weakest']}" if r else '  blk missing'
+        print(f"{orbit} {os.path.basename(os.path.dirname(d)):7s} device={t['device']:5s} regrid {t['regrid_s']:7.2f}s"
+              f"  congruence.py {t['total_s']:6.1f}s  granule {w}s{c5}")
+    gpu = [v for k, v in rows.items() if k.startswith('gpu_')]
+    if gpu and 'cpu_p1' in rows:
+        tc, wc = rows['cpu_p1']
+        rg = statistics.mean(t['regrid_s'] for t, _ in gpu)
+        wg = statistics.mean(w for _, w in gpu)
+        print(f"{orbit} speedup: regrid {tc['regrid_s']:.1f}/{rg:.2f} = {tc['regrid_s'] / rg:.1f}x,"
+              f" granule {wc}/{wg:.0f} = {wc / wg:.1f}x")
+EOF
+fi
 
 if [ "${UNLINK_CHECK:-0}" = 1 ]; then
     rm -f "${MNT}"/terra_fusion/*.h5
