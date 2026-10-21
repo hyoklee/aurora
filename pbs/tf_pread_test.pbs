@@ -1,0 +1,118 @@
+#!/bin/bash
+#PBS -N tf_pread_test
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q capacity
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/tf_pread_test.out
+#PBS -e /home/hyoklee/wrp/run/tf_pread_test.err
+#
+# Parallel inflate in the pipeline (src/tf/tf_pread.py): speed and identical
+# output. Uses the two copies of O33737 that pbs/tf_inflate_bench.pbs left in
+# ${DATA} (original, and MISR rechunked), read into the page cache first.
+#
+# Variants, each PASSES times on both files (GPU regrid on tile 0):
+#   head     the scripts as committed at git HEAD (the old read path)
+#   pread0   this tree, TF_PREAD=0 (netCDF4 reads, ASTER TIR read once)
+#   pread1   this tree, TF_PREAD=1, TF_PREAD_THREADS threads
+# plus one TF_PREAD=check pass per file, which raises on any value that
+# differs from netCDF4. Every variant's congruence, contrast and regrid-input
+# outputs are compared byte for byte with head's.
+#
+# Overrides (qsub -v ...): PASSES (2), TF_PREAD_THREADS (32), DATA.
+
+set -eo pipefail
+WORK=/lus/flare/projects/IOWarp/hyoklee
+REPO=/home/hyoklee/aurora
+VENV=${VENV:-${WORK}/venv-tf}
+PYTAF_DIR=${PYTAF_DIR:-${WORK}/pytaf}
+DATA=${DATA:-${WORK}/tf_inflate}
+PASSES=${PASSES:-2}
+THREADS=${TF_PREAD_THREADS:-32}
+JOBID=${PBS_JOBID%%.*}
+RUN=${RUN:-${DATA}/pread_${JOBID:-manual}}
+NAME=TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5
+declare -A FILE=([orig]=${DATA}/${NAME} [rechunked]=${DATA}/rechunked_${NAME})
+
+mkdir -p "$RUN/work" "$RUN/tf_head"
+exec > >(tee -a "$RUN/job.log") 2>&1
+T0=$SECONDS
+ts() { echo "[$(date +%T) +$((SECONDS - T0))s] $*"; }
+ts "host=$(hostname) run=$RUN head=$(git -C "$REPO" log --oneline -1)"
+git -C "$REPO" archive HEAD src/tf | tar -x -C "$RUN/tf_head" --strip-components=2
+ts "tree: $(git -C "$REPO" status --short src/tf | tr '\n' ' ')"
+
+cat > "${RUN}/pyenv.sh" <<'EOF'
+#!/bin/bash -l
+# Run "$@" with the frameworks module loaded (PyTorch XPU, numpy, h5py).
+module load frameworks/2026.1.0 > /dev/null 2>&1
+exec "$@"
+EOF
+chmod +x "${RUN}/pyenv.sh"
+pyrun() {   # pyrun VAR=val ... -- cmd args
+    local vars=()
+    while [ "$1" != "--" ]; do vars+=("$1"); shift; done; shift
+    env -i HOME="$HOME" USER="$USER" PATH=/usr/bin:/bin TERM=dumb "${vars[@]}" \
+        bash -l "${RUN}/pyenv.sh" "$@"
+}
+
+for f in "${FILE[@]}"; do
+    [ -s "$f" ] || { ts "ERROR: $f missing; run pbs/tf_inflate_bench.pbs first"; exit 1; }
+    t0=$SECONDS; cat "$f" > /dev/null; ts "page cache: $(basename "$f") in $((SECONDS - t0)) s"
+done
+
+run() {   # run <variant> <file key> <pass> <TF dir> <TF_PREAD>
+    local w="${RUN}/work/$1_$2_p$3" t0=$SECONDS
+    pyrun PY="${VENV}/bin/python" TF="$4" PYTAF_DIR="$PYTAF_DIR" TF_REGRID=gpu \
+          TF_PREAD="$5" TF_PREAD_THREADS="$THREADS" ZE_AFFINITY_MASK=0 ZE_FLAT_DEVICE_HIERARCHY=FLAT -- \
+          bash "$4/tf_granule.sh" "${FILE[$2]}" "$w" || true
+    echo $((SECONDS - t0)) > "$w/wall_s"
+    ts "$1 $2 p$3: $((SECONDS - t0)) s $(tr -d '\n ' < "$w/stage_times.json" 2>/dev/null)" \
+       "$(grep -o '"read_M[A-Z]*": [0-9.]*' "$w"/sources_*.json 2>/dev/null | tr -d '"' | tr '\n' ' ')" \
+       "aster_read=$(grep -o '"aster_read_s": [0-9.]*' "$w"/timing_*.json 2>/dev/null | cut -d' ' -f2)"
+    grep -q '!!!' "$w/run.log" && { ts "  FAILED:"; grep -A5 '!!!' "$w/run.log" | sed 's/^/    /'; } || true
+}
+for ((p = 1; p <= PASSES; p++)); do
+    for key in orig rechunked; do
+        run head "$key" "$p" "$RUN/tf_head" 0
+        run pread0 "$key" "$p" "$REPO/src/tf" 0
+        run pread1 "$key" "$p" "$REPO/src/tf" 1
+    done
+done
+for key in orig rechunked; do run check "$key" 1 "$REPO/src/tf" check; done
+
+echo "=== outputs vs head"
+for d in "${RUN}"/work/*_p*; do
+    v=$(basename "$d"); key=${v#*_}; key=${key%_p*}
+    ref="${RUN}/work/head_${key}_p1"
+    [ "$d" = "$ref" ] && continue
+    res=""
+    for j in congruence_b31_WN.json contrast_b31_WN.json regrid_inputs_b31_WN.npz aster_blocks.json; do
+        cmp -s "$ref/$j" "$d/$j" && res+=" $j=same" || res+=" $j=DIFFERS"
+    done
+    echo "$v:$res"
+done
+echo "=== mean wall time per pass (s), and stage means"
+pyrun -- "${VENV}/bin/python" - "$RUN" <<'EOF'
+import glob, json, os, statistics as st, sys
+run = sys.argv[1]
+def j(p):
+    try: return json.load(open(p))
+    except Exception: return {}
+for key in ('orig', 'rechunked'):
+    base = None
+    for var in ('head', 'pread0', 'pread1', 'check'):
+        ds = sorted(glob.glob(f'{run}/work/{var}_{key}_p*'))
+        if not ds: continue
+        wall = st.mean(int(open(f'{d}/wall_s').read()) for d in ds)
+        stg = {k: st.mean(j(f'{d}/stage_times.json').get(k, 0) for d in ds) for k in ('blocks', 'sources', 'congruence', 'contrast')}
+        src = {k: st.mean(j(f'{d}/sources_b31_WN.json').get('timings', {}).get(k, 0) for d in ds) for k in ('read_MODIS', 'read_MISR')}
+        ast = st.mean(j(f'{d}/timing_b31_WN.json').get('aster_read_s', 0) for d in ds)
+        base = base or wall
+        print(f"{key:9s} {var:6s} n={len(ds)} wall {wall:5.1f}  ({base / wall:.2f}x vs head)  "
+              + ' '.join(f'{k} {v:.1f}' for k, v in stg.items())
+              + f"  read_MODIS {src['read_MODIS']:.2f} read_MISR {src['read_MISR']:.2f} aster_read {ast:.2f}"
+              + f"  pread {j(ds[0] + '/sources_b31_WN.json').get('pread', '-')}")
+EOF
+ts "done"

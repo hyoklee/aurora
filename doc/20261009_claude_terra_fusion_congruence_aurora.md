@@ -302,10 +302,12 @@ inflated chunk had its full size and the spot-checked chunks matched h5py.
 
 * **Deflate is 95% of every HDF5 read.** Reading the compressed bytes from
   memory is 0.2 s of 8.8 s.
-* **It parallelises well once no chunk is huge.** ASTER and MODIS already have
-  many chunks; MISR's single 755 MB chunk is the only obstacle, and
-  rechunking those three datasets removes it. 104 threads take inflate from
-  8.1 s to 0.74 s.
+* **It parallelises well once no chunk is huge.** Nearly every dataset is a
+  single chunk (ASTER TIR and geolocation, MODIS geolocation, one
+  `EV_1KM_Emissive` band per chunk), so the pool gains by inflating many
+  datasets at once, not by splitting one. MISR's single 755 MB chunk is the
+  only obstacle, and rechunking those three datasets removes it. 104 threads
+  take inflate from 8.1 s to 0.74 s.
 * **Rechunking alone changes nothing.** The pipeline took 30–33 s per pass on
   both files (identical congruence output), because HDF5 inflates chunks one
   at a time. Same result as rechunk-on-ingest in the P108 run.
@@ -323,14 +325,65 @@ inflated chunk had its full size and the spot-checked chunks matched h5py.
   the clean passes through clio-fs from DRAM (job 8948568), so the FUSE path
   costs nothing measurable here.
 
-The next step would be a parallel chunk reader for the large datasets
-(`read_direct_chunk` + thread-pooled zlib + assembly), checked against the
-current output block by block.
+The parallel chunk reader this suggested was built and measured next (job
+8949299, below).
 
 The first attempt (job 8949071) never fetched the granule: `http_proxy` passed
 into the `bash -l` + `module load` Python environment arrives unset, so Python
 connected directly and timed out. The fetch now takes the proxy from
 `TF_FETCH_PROXY`.
+
+## Parallel inflate in the pipeline (follow-up, 2026-10-21, job 8949299, 1 node)
+
+[`src/tf/tf_pread.py`](../src/tf/tf_pread.py) reads the pipeline's deflate
+datasets in batches: `read_many()` fetches the raw chunks of every dataset in
+the batch with h5py's `read_direct_chunk`, inflates them all in one zlib
+thread pool (zlib releases the GIL), and places each into its output array.
+`tf_aster_blocks.py` reads all ASTER geolocation in one batch, `tf_sources.py`
+all MODIS `_1KM` geolocation, then all `EV_1KM_Emissive` bands of the strip,
+then MISR geolocation and radiance, and `tf_congruence.py` the TIR and
+geolocation of every ASTER granule it needs before the block loop.
+Datasets whose values netCDF4 would transform (`scale_factor`, `add_offset`,
+`_Unsigned`), with other filters, or contiguous, still go through netCDF4.
+
+```
+TF_PREAD=0         netCDF4 reads (default; the old path)
+TF_PREAD=1         parallel reads
+TF_PREAD=check     both; exit if any value differs from netCDF4
+TF_PREAD_THREADS   pool size (default 32)
+```
+
+[`pbs/tf_pread_test.pbs`](../pbs/tf_pread_test.pbs) ran O33737 (both copies
+from job 8949105, in the page cache, GPU regrid on tile 0) with the scripts at
+HEAD, with this tree at `TF_PREAD=0` and at `TF_PREAD=1`, two passes each, plus
+one `check` pass per file. Log: [`data/tf/pread_test_8949299.log`](../data/tf/pread_test_8949299.log).
+
+| Per pass, 2nd pass | HEAD | `TF_PREAD=1`, original | `TF_PREAD=1`, MISR rechunked |
+| --- | --- | --- | --- |
+| Wall time | 31 s | 27 s (1.17×, mean of 2) | **24 s** (1.30×) |
+| `read_MODIS` | 4.53 s | 1.77 s | 1.76 s |
+| `read_MISR` | 4.25 s | 3.47 s | 1.40 s |
+| ASTER reads in `congruence` | 2.69 s | 0.96 s | 0.88 s |
+| `sources` stage | 10 s | 7 s | 4–5 s |
+
+* **Output is unchanged.** The congruence and contrast JSON, the regrid-input
+  npz and `aster_blocks.json` of all 14 runs are byte-identical to HEAD's, and
+  both `check` passes compared all 54 parallel reads with netCDF4 without a
+  difference.
+* **Reads drop from about 11.5 s to about 4 s per pass.** On the original file
+  MISR's 755 MB chunk is still inflated by one thread (3.5 s); the rechunked
+  copy removes that too.
+* **The pass is 1.3× faster, short of the 1.5× (~20 s) estimate.** What is left
+  of `read_MODIS` is mostly masking and concatenating 20 M points in numpy.
+  The remaining 24 s are `contrast` (7 s, all of it pytaf's CPU regrid of
+  MODIS, a candidate for the PVC regrid), the PVC regrid in `congruence`
+  (~4 s), and four Python start-ups with torch imports.
+* **`TF_PREAD=0` costs nothing** (31 s, as HEAD). `check` reads everything
+  twice (35–38 s) and is for validation only.
+* Measured with one analysis alone on the node. P108 ran up to 12 per node;
+  32 threads each would oversubscribe the 104 cores, so there
+  `TF_PREAD_THREADS` should be lower, and the gain is unmeasured. The default
+  stays `TF_PREAD=0`.
 
 ## Caveats
 
@@ -358,6 +411,7 @@ qsub pbs/tf_ingest_bench.pbs                    # striping x tier sweep
 qsub pbs/tf_p108.pbs                            # all of P108, 8 nodes, ~5 h
 qsub -v OMNI=$PWD/omni/terra_fusion_p108.omni.yaml,GRANULES="O33737 O18825",HBM_GB=0,CLEAN_PASSES=2,SKIP_REPORT=1 pbs/tf_congruence.pbs   # PVC vs pytaf, 20 min
 qsub pbs/tf_inflate_bench.pbs                   # deflate share + parallel inflate, 10 min
+qsub pbs/tf_pread_test.pbs                      # TF_PREAD=0/1/check vs HEAD (needs tf_inflate_bench data), 8 min
 python src/tf/tf_block_map.py <work>/O33737 13 P108/TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 out.png
 ```
 

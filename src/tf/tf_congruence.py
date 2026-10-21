@@ -45,7 +45,8 @@ import netCDF4
 import os as _os
 F=_os.environ.get('TF_GRANULE',
   '/mnt/common/datasets-staging/TERRA_BF_L1B_O10204_20011118010522_F000_V001.h5')
-d=netCDF4.Dataset(F)
+import tf_pread
+d=netCDF4.Dataset(F); PR=tf_pread.Reader(F)
 RES=float(os.environ.get('TF_RES','0.02')); PAD=0.05
 # Per-sensor search radius matched to NATIVE FOOTPRINT. A uniform 3 km radius
 # leaves MOPITT (22 km footprint, 6-19 pixels/block) covering almost no target
@@ -142,14 +143,24 @@ def kendall_w(Z):
     return float(12*((S-S.mean())**2).sum()/(m*m*(n**3-n)))
 
 rows=[]; t0=time.time()
+# ASTER TIR of every granule the blocks use, read once in one batch (tf_pread
+# inflates the one-chunk datasets in parallel); this used to re-read a granule
+# for each of its blocks.
+tb=time.time(); AST={}
+need=list(dict.fromkeys(b['granule'] for b in blocks))
+tirs=[d['ASTER'][gn]['TIR'] for gn in need]
+A=PR.read_many([(v,()) for g in tirs for v in (g['Geolocation']['Latitude'],g['Geolocation']['Longitude'],g['ImageData10'])])
+for j,(gn,g) in enumerate(zip(need,tirs)):
+    AST[gn]=(g['ImageData10'],)+tuple(A[3*j:3*j+3])
+T['aster_read_s']+=time.time()-tb
 for i,b in enumerate(blocks):
     la=np.arange(b['lat0'],b['lat1']+RES,RES); lo=np.arange(b['lon0'],b['lon1']+RES,RES)
     TLA,TLO=np.meshgrid(la,lo,indexing='ij'); tla=TLA.ravel(); tlo=TLO.ravel()
     f={}; tb=time.time()
-    g=d['ASTER'][b['granule']]['TIR']; IM=g['ImageData10']
-    ala=np.asarray(g['Geolocation']['Latitude'][:],'f8').ravel()
-    alo=np.asarray(g['Geolocation']['Longitude'][:],'f8').ravel()
-    av=np.asarray(IM[:],'f8'); am=ok(ala,alo)&vmask(IM,av).ravel(); av=av.ravel()
+    IM,ala,alo,av=AST[b['granule']]
+    ala=np.asarray(ala,'f8').ravel()
+    alo=np.asarray(alo,'f8').ravel()
+    av=np.asarray(av,'f8'); am=ok(ala,alo)&vmask(IM,av).ravel(); av=av.ravel()
     T['aster_read_s']+=time.time()-tb
     if am.sum()>100: f['ASTER']=regrid_any(ala[am].copy(),alo[am].copy(),av[am].copy(),tla,tlo,MAXR['ASTER'])
     for k in ['MODIS','MISR','CERES','MOPITT']:
@@ -185,7 +196,7 @@ for i,b in enumerate(blocks):
 T['total_s']=time.time()-t0
 print(f'# {len(rows)} blocks, {T["total_s"]:.1f}s  [{TAG}]  regrid={REGRID} '
       f'{T["regrid_s"]:.1f}s  aster_read={T["aster_read_s"]:.1f}s', flush=True)
-json.dump(dict(regrid=REGRID,device=str(XPU),blocks=len(rows),**T),
+json.dump(dict(regrid=REGRID,device=str(XPU),blocks=len(rows),pread=PR.stats,**T),
           open(f'timing_{TAG}.json','w'),indent=1)
 if REGRID=='check':
     json.dump(CHECK,open(f'regrid_check_{TAG}.json','w'),indent=1)

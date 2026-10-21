@@ -1,0 +1,41 @@
+[03:05:42 +0s] host=x4606c2s4b0n0 run=/lus/flare/projects/IOWarp/hyoklee/tf_inflate/pread_8949299 head=fe13ea3 test: measure how much of the Terra Fusion read path is deflate
+[03:05:42 +0s] tree:  M src/tf/tf_aster_blocks.py  M src/tf/tf_congruence.py  M src/tf/tf_sources.py ?? src/tf/__pycache__/ ?? src/tf/tf_pread.py 
+[03:05:54 +12s] page cache: TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 in 12 s
+[03:06:08 +26s] page cache: rechunked_TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 in 14 s
+[03:06:44 +62s] head orig p1: 36 s {"blocks":4,"contrast":7,"congruence":14,"sources":10} read_MODIS: 4.56340765953064 read_MISR: 4.277831792831421 read_MOPITT: 0.0025076866149902344  aster_read=2.691767930984497
+[03:07:15 +93s] pread0 orig p1: 31 s {"blocks":1,"contrast":7,"congruence":13,"sources":10} read_MODIS: 4.696702718734741 read_MISR: 4.265291690826416 read_MOPITT: 0.0022430419921875  aster_read=2.8925795555114746
+[03:07:41 +119s] pread1 orig p1: 26 s {"blocks":0,"contrast":7,"congruence":11,"sources":7} read_MODIS: 1.7891497611999512 read_MISR: 3.485940933227539 read_MOPITT: 0.002163410186767578  aster_read=0.8749840259552002
+[03:08:12 +150s] head rechunked p1: 31 s {"blocks":0,"contrast":7,"congruence":13,"sources":10} read_MODIS: 4.5329742431640625 read_MISR: 4.115780591964722 read_MOPITT: 0.002243518829345703  aster_read=2.711456775665283
+[03:08:43 +181s] pread0 rechunked p1: 31 s {"blocks":0,"contrast":7,"congruence":13,"sources":10} read_MODIS: 4.669697523117065 read_MISR: 4.110068321228027 read_MOPITT: 0.002251148223876953  aster_read=2.8888509273529053
+[03:09:06 +204s] pread1 rechunked p1: 23 s {"blocks":1,"contrast":7,"congruence":11,"sources":4} read_MODIS: 1.7605197429656982 read_MISR: 1.4025733470916748 read_MOPITT: 0.002087831497192383  aster_read=0.8732848167419434
+[03:09:37 +235s] head orig p2: 31 s {"blocks":0,"contrast":7,"congruence":13,"sources":10} read_MODIS: 4.53406548500061 read_MISR: 4.245941400527954 read_MOPITT: 0.0024275779724121094  aster_read=2.6936464309692383
+[03:10:08 +266s] pread0 orig p2: 31 s {"blocks":0,"contrast":7,"congruence":13,"sources":10} read_MODIS: 4.6451804637908936 read_MISR: 4.223194122314453 read_MOPITT: 0.0025217533111572266  aster_read=2.8831934928894043
+[03:10:35 +293s] pread1 orig p2: 27 s {"blocks":0,"contrast":7,"congruence":12,"sources":7} read_MODIS: 1.765049934387207 read_MISR: 3.4664974212646484 read_MOPITT: 0.002459287643432617  aster_read=0.9648139476776123
+[03:11:05 +323s] head rechunked p2: 30 s {"blocks":0,"contrast":7,"congruence":12,"sources":10} read_MODIS: 4.52144980430603 read_MISR: 4.1309263706207275 read_MOPITT: 0.002187967300415039  aster_read=2.7081007957458496
+[03:11:36 +354s] pread0 rechunked p2: 31 s {"blocks":0,"contrast":7,"congruence":12,"sources":10} read_MODIS: 4.668890953063965 read_MISR: 4.12051796913147 read_MOPITT: 0.0022149085998535156  aster_read=2.889824628829956
+[03:12:00 +378s] pread1 rechunked p2: 24 s {"blocks":0,"contrast":7,"congruence":11,"sources":5} read_MODIS: 1.7550387382507324 read_MISR: 1.399562120437622 read_MOPITT: 0.0020780563354492188  aster_read=0.8820440769195557
+[03:12:38 +416s] check orig p1: 38 s {"blocks":1,"contrast":7,"congruence":15,"sources":15} read_MODIS: 5.572856426239014 read_MISR: 8.17629885673523 read_MOPITT: 0.002432584762573242  aster_read=3.7372097969055176
+[03:13:13 +451s] check rechunked p1: 35 s {"blocks":0,"contrast":7,"congruence":14,"sources":13} read_MODIS: 5.5924952030181885 read_MISR: 6.0338380336761475 read_MOPITT: 0.002193927764892578  aster_read=3.624772310256958
+=== outputs vs head
+check_orig_p1: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+check_rechunked_p1: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+head_orig_p2: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+head_rechunked_p2: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+pread0_orig_p1: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+pread0_orig_p2: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+pread0_rechunked_p1: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+pread0_rechunked_p2: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+pread1_orig_p1: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+pread1_orig_p2: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+pread1_rechunked_p1: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+pread1_rechunked_p2: congruence_b31_WN.json=same contrast_b31_WN.json=same regrid_inputs_b31_WN.npz=same aster_blocks.json=same
+=== mean wall time per pass (s), and stage means
+orig      head   n=2 wall  33.5  (1.00x vs head)  blocks 2.0 sources 10.0 congruence 13.5 contrast 7.0  read_MODIS 4.55 read_MISR 4.26 aster_read 2.69  pread -
+orig      pread0 n=2 wall  31.0  (1.08x vs head)  blocks 0.5 sources 10.0 congruence 13.0 contrast 7.0  read_MODIS 4.67 read_MISR 4.24 aster_read 2.89  pread {'mode': '0', 'threads': 32, 'parallel': 0, 'fallback': 54, 'chunks': 0, 'read_s': 7.1}
+orig      pread1 n=2 wall  26.5  (1.26x vs head)  blocks 0.0 sources 7.0 congruence 11.5 contrast 7.0  read_MODIS 1.78 read_MISR 3.48 aster_read 0.92  pread {'mode': '1', 'threads': 32, 'parallel': 54, 'fallback': 0, 'chunks': 54, 'read_s': 3.385}
+orig      check  n=1 wall  38.0  (0.88x vs head)  blocks 1.0 sources 15.0 congruence 15.0 contrast 7.0  read_MODIS 5.57 read_MISR 8.18 aster_read 3.74  pread {'mode': 'check', 'threads': 32, 'parallel': 54, 'fallback': 0, 'chunks': 54, 'read_s': 11.941}
+rechunked head   n=2 wall  30.5  (1.00x vs head)  blocks 0.0 sources 10.0 congruence 12.5 contrast 7.0  read_MODIS 4.53 read_MISR 4.12 aster_read 2.71  pread -
+rechunked pread0 n=2 wall  31.0  (0.98x vs head)  blocks 0.0 sources 10.0 congruence 12.5 contrast 7.0  read_MODIS 4.67 read_MISR 4.12 aster_read 2.89  pread {'mode': '0', 'threads': 32, 'parallel': 0, 'fallback': 54, 'chunks': 0, 'read_s': 6.94}
+rechunked pread1 n=2 wall  23.5  (1.30x vs head)  blocks 0.5 sources 4.5 congruence 11.0 contrast 7.0  read_MODIS 1.76 read_MISR 1.40 aster_read 0.88  pread {'mode': '1', 'threads': 32, 'parallel': 54, 'fallback': 0, 'chunks': 255, 'read_s': 1.322}
+rechunked check  n=1 wall  35.0  (0.87x vs head)  blocks 0.0 sources 13.0 congruence 14.0 contrast 7.0  read_MODIS 5.59 read_MISR 6.03 aster_read 3.62  pread {'mode': 'check', 'threads': 32, 'parallel': 54, 'fallback': 0, 'chunks': 255, 'read_s': 9.804}
+[03:13:17 +455s] done

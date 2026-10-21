@@ -21,6 +21,7 @@ Usage:
     MODIS_BAND_IDX=10 python3 bin/tf_sources.py      # -> regrid_inputs_b31.npz
 """
 import netCDF4, numpy as np, json, time, os, sys
+import tf_pread
 
 F = os.environ.get(
     'TF_GRANULE',
@@ -41,6 +42,7 @@ PAD = 0.05
 
 blocks = json.load(open('aster_blocks.json'))
 d = netCDF4.Dataset(F)
+PR = tf_pread.Reader(F)
 LA0 = min(b['lat0'] for b in blocks) - PAD; LA1 = max(b['lat1'] for b in blocks) + PAD
 LO0 = min(b['lon0'] for b in blocks) - PAD; LO1 = max(b['lon1'] for b in blocks) + PAD
 
@@ -72,18 +74,23 @@ SRC = {}; T = {}
 
 # ---- MODIS -----------------------------------------------------------------
 t = time.time(); mla = []; mlo = []; mv = []; band_label = None
-for gn, g in d['MODIS'].groups.items():
-    if '_1KM' not in g.groups: continue
-    G = g['_1KM']['Geolocation']
-    la = np.asarray(G['Latitude'][:], 'f8'); lo = np.asarray(G['Longitude'][:], 'f8')
+# Geolocation of every granule in one batch, then the band of those in the strip
+# (tf_pread: each of these datasets is one chunk, so they inflate in parallel).
+mg = [g for g in d['MODIS'].groups.values() if '_1KM' in g.groups]
+LL = PR.read_many([(g['_1KM']['Geolocation'][k], ()) for g in mg for k in ('Latitude', 'Longitude')])
+keep = []
+for i, g in enumerate(mg):
+    la = np.asarray(LL[2 * i], 'f8'); lo = np.asarray(LL[2 * i + 1], 'f8')
     m = ok(la, lo) & (la >= LA0) & (la <= LA1) & (lo >= LO0) & (lo <= LO1)
-    if not m.any(): continue
+    if m.any(): keep.append((g, la, lo, m))
+EVS = PR.read_many([(g['_1KM']['Data_Fields']['EV_1KM_Emissive'], (BAND_IDX,)) for g, _, _, _ in keep])
+for (g, la, lo, m), v in zip(keep, EVS):
     EV = g['_1KM']['Data_Fields']['EV_1KM_Emissive']
     if band_label is None:
         names = getattr(EV, 'band_names', '')
         parts = [s.strip() for s in str(names).split(',') if s.strip()]
         band_label = parts[BAND_IDX] if BAND_IDX < len(parts) else str(BAND_IDX)
-    v = np.asarray(EV[BAND_IDX, :, :], 'f8')
+    v = np.asarray(v, 'f8')
     m &= vmask(EV, v)
     mla.append(la[m]); mlo.append(lo[m]); mv.append(v[m])
 SRC['MODIS'] = (np.concatenate(mla), np.concatenate(mlo), np.concatenate(mv))
@@ -92,10 +99,12 @@ T['read_MODIS'] = time.time() - t
 # ---- MISR ------------------------------------------------------------------
 t = time.time()
 gl = d['MISR']['Geolocation']
-la = np.asarray(gl['GeoLatitude'][:], 'f8'); lo = np.asarray(gl['GeoLongitude'][:], 'f8')
-m = ok(la, lo) & (la >= LA0) & (la <= LA1) & (lo >= LO0) & (lo <= LO1)
 rr = d['MISR']['AN']['Data_Fields']['Red_Radiance']      # single 755 MB chunk
-if os.environ.get('TF_MISR_SUBSET', '0') == '1':
+SUBSET = os.environ.get('TF_MISR_SUBSET', '0') == '1'
+R = PR.read_many([(gl['GeoLatitude'], ()), (gl['GeoLongitude'], ())] + ([] if SUBSET else [(rr, ())]))
+la = np.asarray(R[0], 'f8'); lo = np.asarray(R[1], 'f8')
+m = ok(la, lo) & (la >= LA0) & (la <= LA1) & (lo >= LO0) & (lo <= LO1)
+if SUBSET:
     # Read only the SOM blocks the strip touches. On the original single chunk
     # this inflates all 755 MB anyway; on a rechunked file ({1,512,2048}, see
     # tf_rechunk.py) it inflates just those blocks. The values are the same.
@@ -106,7 +115,7 @@ if os.environ.get('TF_MISR_SUBSET', '0') == '1':
         v[b0:b1] = np.asarray(rr[b0:b1], 'f8')[:, ::4, ::4]
     T['MISR_blocks'] = b1 - b0
 else:
-    v = np.asarray(rr[:], 'f8')                          # must read the whole chunk
+    v = np.asarray(R[2], 'f8')                           # must read the whole chunk
     v = v[:, ::4, ::4]   # (180,512,2048) radiance vs (180,128,512) geoloc
 m &= vmask(rr, v)
 SRC['MISR'] = (la[m], lo[m], v[m]); T['read_MISR'] = time.time() - t
@@ -174,7 +183,7 @@ if (MOPITT_CHAN, MOPITT_STATE) != (4, 0):
     tag += f'_m{MOPITT_CHAN}{MOPITT_STATE}'
 path = os.environ.get('TF_NPZ', f'regrid_inputs_{tag}.npz')
 np.savez(path, **out)
-json.dump(dict(timings=T, modis_band_idx=BAND_IDX, modis_band=band_label,
+json.dump(dict(timings=T, pread=PR.stats, modis_band_idx=BAND_IDX, modis_band=band_label,
                ceres_field=CERES_FIELD, mopitt_chan=MOPITT_CHAN,
                mopitt_state=MOPITT_STATE, npz=path, granule=F),
           open(f'sources_{tag}.json', 'w'), indent=1)
