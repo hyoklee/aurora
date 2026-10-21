@@ -1,0 +1,139 @@
+#!/bin/bash
+#PBS -N tf_zfp_test
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q capacity
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/tf_zfp_test.out
+#PBS -e /home/hyoklee/wrp/run/tf_zfp_test.err
+#
+# What lossy ZFP does to congruence, and how small it makes the data the
+# pipeline reads: the question to answer before decoding ZFP on the PVC.
+#
+# Works on the MISR-rechunked O33737 that pbs/tf_inflate_bench.pbs left in
+# ${DATA}. The pipeline (TF_PREAD=1, GPU regrid on tile 0) runs once on that
+# file as the reference, then once per ZFP mode on a copy whose datasets
+# src/tf/tf_zfp_encode.py replaced with their ZFP-decoded values. Every mode
+# re-codes from the untouched file, so the modes are independent. Per mode it
+# reports ZFP size against deflate, coding errors per field, and the change in
+# every block's congruence (C5), Kendall W and weakest sensor. "lossless" is
+# ZFP's reversible mode and must reproduce the reference byte for byte.
+#
+# Overrides (qsub -v ...): MODES ("lossless rate=24 rate=16 rate=12 rate=8
+# rate=4"), DATA, KEEP=1 keeps the 30 GB working copy.
+
+set -eo pipefail
+WORK=/lus/flare/projects/IOWarp/hyoklee
+REPO=/home/hyoklee/aurora
+VENV=${VENV:-${WORK}/venv-tf}
+PYTAF_DIR=${PYTAF_DIR:-${WORK}/pytaf}
+DATA=${DATA:-${WORK}/tf_inflate}
+MODES=${MODES:-lossless rate=24 rate=16 rate=12 rate=8 rate=4}
+JOBID=${PBS_JOBID%%.*}
+RUN=${RUN:-${DATA}/zfp_${JOBID:-manual}}
+NAME=TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5
+SRC=${DATA}/rechunked_${NAME}
+COPY=${RUN}/granule/${NAME}
+
+mkdir -p "$RUN/work" "$RUN/granule"
+exec > >(tee -a "$RUN/job.log") 2>&1
+T0=$SECONDS
+ts() { echo "[$(date +%T) +$((SECONDS - T0))s] $*"; }
+ts "host=$(hostname) run=$RUN head=$(git -C "$REPO" log --oneline -1) modes=$MODES"
+[ -s "$SRC" ] || { ts "ERROR: $SRC missing; run pbs/tf_inflate_bench.pbs first"; exit 1; }
+
+cat > "${RUN}/pyenv.sh" <<'EOF'
+#!/bin/bash -l
+# Run "$@" with the frameworks module loaded (PyTorch XPU, numpy, h5py).
+module load frameworks/2026.1.0 > /dev/null 2>&1
+exec "$@"
+EOF
+chmod +x "${RUN}/pyenv.sh"
+pyrun() {   # pyrun VAR=val ... -- cmd args
+    local vars=()
+    while [ "$1" != "--" ]; do vars+=("$1"); shift; done; shift
+    env -i HOME="$HOME" USER="$USER" PATH=/usr/bin:/bin TERM=dumb "${vars[@]}" \
+        bash -l "${RUN}/pyenv.sh" "$@"
+}
+pyrun -- "${VENV}/bin/python" -c 'import zfpy' || { ts "ERROR: zfpy missing from ${VENV}"; exit 1; }
+
+t0=$SECONDS; cp "$SRC" "$COPY"; ts "copy: $((SECONDS - t0)) s, $(du -h "$COPY" | cut -f1)"
+t0=$SECONDS; cat "$SRC" > /dev/null; ts "page cache: source in $((SECONDS - t0)) s"
+
+run() {   # run <name> <granule>
+    local w="${RUN}/work/$1" t0=$SECONDS
+    pyrun PY="${VENV}/bin/python" TF="$REPO/src/tf" PYTAF_DIR="$PYTAF_DIR" TF_REGRID=gpu \
+          TF_PREAD=1 ZE_AFFINITY_MASK=0 ZE_FLAT_DEVICE_HIERARCHY=FLAT -- \
+          bash "$REPO/src/tf/tf_granule.sh" "$2" "$w" || true
+    ts "pipeline $1: $((SECONDS - t0)) s $(tr -d '\n ' < "$w/stage_times.json" 2>/dev/null)"
+    grep -q '!!!' "$w/run.log" && { ts "  FAILED:"; grep -A5 '!!!' "$w/run.log" | sed 's/^/    /'; } || true
+}
+run ref "$SRC"
+for m in $MODES; do
+    t0=$SECONDS
+    pyrun -- "${VENV}/bin/python" "$REPO/src/tf/tf_zfp_encode.py" "$SRC" "$COPY" "$m" > "$RUN/encode_${m/=/}.json" \
+        || { ts "encode $m FAILED"; continue; }
+    ts "encode $m: $((SECONDS - t0)) s"
+    run "${m/=/}" "$COPY"
+done
+
+echo "=== ZFP vs deflate, coding error, and congruence vs the reference"
+pyrun -- "${VENV}/bin/python" - "$RUN" $MODES <<'EOF'
+import json, math, sys, numpy as np
+run, modes = sys.argv[1], sys.argv[2:]
+def j(p):
+    try: return json.load(open(p))
+    except Exception: return None
+def leaves(x, pre=''):
+    if isinstance(x, dict):
+        for k, v in x.items(): yield from leaves(v, f'{pre}/{k}')
+    elif isinstance(x, list):
+        for i, v in enumerate(x): yield from leaves(v, f'{pre}/{i}')
+    elif isinstance(x, (int, float)) and not isinstance(x, bool):
+        yield pre, float(x)
+def ranks(v):
+    r = np.empty(len(v)); r[np.argsort(v)] = np.arange(len(v)); return r
+ref = {b['blk']: b for b in j(f'{run}/work/ref/congruence_b31_WN.json') or []}
+refc = dict(leaves(j(f'{run}/work/ref/contrast_b31_WN.json') or {}))
+print(f'reference: {len(ref)} blocks')
+rows = []
+for m in modes:
+    tag = m.replace('=', '')
+    e = j(f'{run}/encode_{tag}.json')
+    if not e: print(f'{m}: no encode result'); continue
+    T = e['total']
+    bpv = (T['zfp_MB'] + T['mask_MB']) * 8e6 / T['values']
+    print(f"\n--- {m}: {T['values'] / 1e6:.0f} M values, raw {T['raw_MB']:.0f} MB, deflate {T['deflate_MB']:.0f} MB, "
+          f"ZFP {T['zfp_MB'] + T['mask_MB']:.0f} MB ({bpv:.1f} bits/value, {T['deflate_MB'] / (T['zfp_MB'] + T['mask_MB']):.2f}x smaller than deflate); "
+          f"1 thread: inflate {T['inflate_s']:.1f} s, ZFP decode {T['zfp_decode_s']:.1f} s, encode {T['zfp_encode_s']:.1f} s")
+    for f, r in sorted(e['fields'].items()):
+        print(f"    {f:28s} {r['bits_per_value']:5.1f} b/v  deflate {r['deflate_MB']:8.1f} MB  zfp {r['zfp_MB'] + r['mask_MB']:8.1f} MB"
+              f"  max_err {r['max_err']:.3g}  rms_err {r['rms_err']:.3g}  (std {r['std']:.3g}, rms/std {r['rms_err'] / r['std'] if r['std'] else 0:.2g})"
+              f"  masked {r['masked']}")
+    got = {b['blk']: b for b in j(f'{run}/work/{tag}/congruence_b31_WN.json') or []}
+    common = sorted(set(ref) & set(got))
+    if not common: print('    congruence: no output'); continue
+    dc = [abs(got[k]['congruence'] - ref[k]['congruence']) for k in common
+          if not (math.isnan(got[k]['congruence']) and math.isnan(ref[k]['congruence']))]
+    dw = [abs(got[k]['kendall_w'] - ref[k]['kendall_w']) for k in common]
+    weak = sum(got[k]['weakest'] != ref[k]['weakest'] for k in common)
+    a = np.array([ref[k]['congruence'] for k in common]); b = np.array([got[k]['congruence'] for k in common])
+    ok = np.isfinite(a) & np.isfinite(b)
+    rho = np.corrcoef(ranks(a[ok]), ranks(b[ok]))[0, 1] if ok.sum() > 2 else float('nan')
+    top = common[int(np.nanargmax(a))] == common[int(np.nanargmax(b))]
+    gc = dict(leaves(j(f'{run}/work/{tag}/contrast_b31_WN.json') or {}))
+    dct = [abs(gc[k] - v) / (abs(v) or 1) for k, v in refc.items() if k in gc and not (math.isnan(v) and math.isnan(gc[k]))]
+    same = all(open(f'{run}/work/ref/{x}', 'rb').read() == open(f'{run}/work/{tag}/{x}', 'rb').read()
+               for x in ('congruence_b31_WN.json', 'contrast_b31_WN.json', 'regrid_inputs_b31_WN.npz'))
+    print(f"    congruence: {len(got)} blocks ({len(common)} matched)  max|dC5| {max(dc):.3g}  mean|dC5| {np.mean(dc):.3g}"
+          f"  max|dW| {max(dw):.3g}  weakest changed {weak}  rank rho {rho:.4f}  top block same {top}"
+          f"  contrast max rel diff {max(dct) if dct else float('nan'):.3g}  identical to ref: {same}")
+    rows.append((m, bpv, T['deflate_MB'] / (T['zfp_MB'] + T['mask_MB']), max(dc), np.mean(dc), weak, rho, same))
+print('\n=== summary')
+print(f"{'mode':10s} {'bits/val':>8s} {'vs deflate':>10s} {'max|dC5|':>9s} {'mean|dC5|':>9s} {'weakest':>7s} {'rank rho':>8s} identical")
+for m, bpv, x, mx, mn, w, rho, same in rows:
+    print(f'{m:10s} {bpv:8.1f} {x:9.2f}x {mx:9.3g} {mn:9.3g} {w:7d} {rho:8.4f} {same}')
+EOF
+[ "${KEEP:-0}" = 1 ] || { rm -f "$COPY"; ts "removed the working copy"; }
+ts "done"

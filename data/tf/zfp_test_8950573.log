@@ -1,0 +1,101 @@
+[17:17:41 +1s] host=x4117c4s3b0n0 run=/lus/flare/projects/IOWarp/hyoklee/tf_inflate/zfp_8950573 head=2bca375 feat: inflate the Terra Fusion pipeline's chunks in parallel (TF_PREAD) modes=lossless rate=24 rate=16 rate=12 rate=8 rate=4
+[17:18:09 +29s] copy: 27 s, 27G
+[17:18:15 +35s] page cache: source in 6 s
+[17:18:42 +62s] pipeline ref: 27 s {"blocks":3,"contrast":7,"congruence":12,"sources":4}
+[17:20:16 +156s] encode lossless: 94 s
+[17:20:47 +187s] pipeline lossless: 31 s {"blocks":6,"contrast":7,"congruence":12,"sources":5}
+[17:22:04 +264s] encode rate=24: 77 s
+[17:22:29 +289s] pipeline rate24: 25 s {"blocks":0,"contrast":7,"congruence":12,"sources":5}
+[17:23:49 +369s] encode rate=16: 80 s
+[17:24:12 +392s] pipeline rate16: 23 s {"blocks":1,"contrast":7,"congruence":11,"sources":4}
+[17:25:30 +470s] encode rate=12: 78 s
+[17:25:54 +494s] pipeline rate12: 24 s {"blocks":1,"contrast":7,"congruence":11,"sources":4}
+[17:27:04 +564s] encode rate=8: 70 s
+[17:27:28 +588s] pipeline rate8: 24 s {"blocks":1,"contrast":7,"congruence":11,"sources":4}
+[17:28:23 +643s] encode rate=4: 55 s
+[17:28:48 +668s] pipeline rate4: 25 s {"blocks":0,"contrast":7,"congruence":12,"sources":5}
+=== ZFP vs deflate, coding error, and congruence vs the reference
+reference: 35 blocks
+
+--- lossless: 459 M values, raw 2054 MB, deflate 1098 MB, ZFP 838 MB (14.6 bits/value, 1.31x smaller than deflate); 1 thread: inflate 8.1 s, ZFP decode 8.8 s, encode 10.0 s
+    ASTER ImageData10             15.9 b/v  deflate     23.5 MB  zfp     54.1 MB  max_err 0  rms_err 0  (std 1.79, rms/std 0)  masked 10095049
+    ASTER Latitude                20.3 b/v  deflate    147.2 MB  zfp     69.0 MB  max_err 0  rms_err 0  (std 25.1, rms/std 0)  masked 0
+    ASTER Longitude               18.2 b/v  deflate    163.3 MB  zfp     61.8 MB  max_err 0  rms_err 0  (std 76.1, rms/std 0)  masked 0
+    MISR GeoLatitude              10.8 b/v  deflate     34.1 MB  zfp     15.8 MB  max_err 0  rms_err 0  (std 56.5, rms/std 0)  masked 0
+    MISR GeoLongitude             11.1 b/v  deflate     35.8 MB  zfp     16.4 MB  max_err 0  rms_err 0  (std 89.6, rms/std 0)  masked 0
+    MISR Red_Radiance             13.8 b/v  deflate    225.4 MB  zfp    325.6 MB  max_err 0  rms_err 0  (std 88, rms/std 0)  masked 86289754
+    MODIS EV_1KM_Emissive         22.0 b/v  deflate    113.5 MB  zfp    151.4 MB  max_err 0  rms_err 0  (std 2.22, rms/std 0)  masked 1715
+    MODIS Latitude                10.5 b/v  deflate    172.3 MB  zfp     72.4 MB  max_err 0  rms_err 0  (std 49.9, rms/std 0)  masked 0
+    MODIS Longitude               10.4 b/v  deflate    182.9 MB  zfp     71.8 MB  max_err 0  rms_err 0  (std 94.8, rms/std 0)  masked 0
+    congruence: 35 blocks (35 matched)  max|dC5| 0  mean|dC5| 0  max|dW| 0  weakest changed 0  rank rho 1.0000  top block same True  contrast max rel diff 0  identical to ref: True
+
+--- rate=24: 459 M values, raw 2054 MB, deflate 1098 MB, ZFP 1384 MB (24.1 bits/value, 0.79x smaller than deflate); 1 thread: inflate 8.0 s, ZFP decode 10.9 s, encode 12.4 s
+    ASTER ImageData10             24.1 b/v  deflate     23.5 MB  zfp     82.0 MB  max_err 1.91e-06  rms_err 9.87e-09  (std 1.79, rms/std 5.5e-09)  masked 10095049
+    ASTER Latitude                24.1 b/v  deflate    147.2 MB  zfp     81.9 MB  max_err 1.98e-11  rms_err 8.68e-14  (std 25.1, rms/std 3.5e-15)  masked 0
+    ASTER Longitude               24.1 b/v  deflate    163.3 MB  zfp     81.9 MB  max_err 4.76e-11  rms_err 8.21e-14  (std 76.1, rms/std 1.1e-15)  masked 0
+    MISR GeoLatitude              25.6 b/v  deflate     34.1 MB  zfp     37.8 MB  max_err 3.81e-06  rms_err 3.31e-08  (std 56.5, rms/std 5.9e-10)  masked 0
+    MISR GeoLongitude             25.6 b/v  deflate     35.8 MB  zfp     37.8 MB  max_err 6.1e-05  rms_err 3.34e-07  (std 89.6, rms/std 3.7e-09)  masked 0
+    MISR Red_Radiance             24.0 b/v  deflate    225.4 MB  zfp    566.3 MB  max_err 0.000122  rms_err 1.34e-06  (std 88, rms/std 1.5e-08)  masked 86289754
+    MODIS EV_1KM_Emissive         24.1 b/v  deflate    113.5 MB  zfp    165.4 MB  max_err 1.91e-06  rms_err 2.23e-08  (std 2.22, rms/std 1e-08)  masked 1715
+    MODIS Latitude                24.1 b/v  deflate    172.3 MB  zfp    165.4 MB  max_err 1.49e-08  rms_err 8.3e-12  (std 49.9, rms/std 1.7e-13)  masked 0
+    MODIS Longitude               24.1 b/v  deflate    182.9 MB  zfp    165.4 MB  max_err 0.000137  rms_err 3.4e-07  (std 94.8, rms/std 3.6e-09)  masked 0
+    congruence: 35 blocks (35 matched)  max|dC5| 1.68e-05  mean|dC5| 3.85e-06  max|dW| 2.31e-05  weakest changed 0  rank rho 1.0000  top block same True  contrast max rel diff 5.27e-09  identical to ref: False
+
+--- rate=16: 459 M values, raw 2054 MB, deflate 1098 MB, ZFP 923 MB (16.1 bits/value, 1.19x smaller than deflate); 1 thread: inflate 8.1 s, ZFP decode 8.9 s, encode 11.2 s
+    ASTER ImageData10             16.1 b/v  deflate     23.5 MB  zfp     54.7 MB  max_err 0.000392  rms_err 5.52e-06  (std 1.79, rms/std 3.1e-06)  masked 10095049
+    ASTER Latitude                16.1 b/v  deflate    147.2 MB  zfp     54.6 MB  max_err 8.25e-09  rms_err 4.57e-11  (std 25.1, rms/std 1.8e-12)  masked 0
+    ASTER Longitude               16.1 b/v  deflate    163.3 MB  zfp     54.6 MB  max_err 1.34e-08  rms_err 6.92e-11  (std 76.1, rms/std 9.1e-13)  masked 0
+    MISR GeoLatitude              17.1 b/v  deflate     34.1 MB  zfp     25.2 MB  max_err 3.81e-06  rms_err 3.31e-08  (std 56.5, rms/std 5.9e-10)  masked 0
+    MISR GeoLongitude             17.1 b/v  deflate     35.8 MB  zfp     25.2 MB  max_err 0.00713  rms_err 4.34e-05  (std 89.6, rms/std 4.8e-07)  masked 0
+    MISR Red_Radiance             16.0 b/v  deflate    225.4 MB  zfp    377.6 MB  max_err 0.0387  rms_err 0.000378  (std 88, rms/std 4.3e-06)  masked 86289754
+    MODIS EV_1KM_Emissive         16.0 b/v  deflate    113.5 MB  zfp    110.3 MB  max_err 0.000383  rms_err 9.64e-06  (std 2.22, rms/std 4.3e-06)  masked 1715
+    MODIS Latitude                16.0 b/v  deflate    172.3 MB  zfp    110.3 MB  max_err 7.63e-06  rms_err 9.2e-08  (std 49.9, rms/std 1.8e-09)  masked 0
+    MODIS Longitude               16.0 b/v  deflate    182.9 MB  zfp    110.3 MB  max_err 0.0345  rms_err 5.12e-05  (std 94.8, rms/std 5.4e-07)  masked 0
+    congruence: 35 blocks (35 matched)  max|dC5| 0.00423  mean|dC5| 0.000632  max|dW| 0.00466  weakest changed 0  rank rho 0.9989  top block same True  contrast max rel diff 2.28e-06  identical to ref: False
+
+--- rate=12: 459 M values, raw 2054 MB, deflate 1098 MB, ZFP 692 MB (12.1 bits/value, 1.59x smaller than deflate); 1 thread: inflate 8.1 s, ZFP decode 7.7 s, encode 10.4 s
+    ASTER ImageData10             12.1 b/v  deflate     23.5 MB  zfp     41.0 MB  max_err 0.00611  rms_err 8.8e-05  (std 1.79, rms/std 4.9e-05)  masked 10095049
+    ASTER Latitude                12.0 b/v  deflate    147.2 MB  zfp     41.0 MB  max_err 4.13e-07  rms_err 2.5e-09  (std 25.1, rms/std 9.9e-11)  masked 0
+    ASTER Longitude               12.0 b/v  deflate    163.3 MB  zfp     41.0 MB  max_err 2.32e-07  rms_err 2.63e-09  (std 76.1, rms/std 3.5e-11)  masked 0
+    MISR GeoLatitude              12.8 b/v  deflate     34.1 MB  zfp     18.9 MB  max_err 7.63e-06  rms_err 3.72e-08  (std 56.5, rms/std 6.6e-10)  masked 0
+    MISR GeoLongitude             12.8 b/v  deflate     35.8 MB  zfp     18.9 MB  max_err 0.3  rms_err 0.00159  (std 89.6, rms/std 1.8e-05)  masked 0
+    MISR Red_Radiance             12.0 b/v  deflate    225.4 MB  zfp    283.2 MB  max_err 0.627  rms_err 0.00605  (std 88, rms/std 6.9e-05)  masked 86289754
+    MODIS EV_1KM_Emissive         12.0 b/v  deflate    113.5 MB  zfp     82.7 MB  max_err 0.00566  rms_err 0.000154  (std 2.22, rms/std 6.9e-05)  masked 1715
+    MODIS Latitude                12.0 b/v  deflate    172.3 MB  zfp     82.7 MB  max_err 0.000145  rms_err 2.14e-06  (std 49.9, rms/std 4.3e-08)  masked 0
+    MODIS Longitude               12.0 b/v  deflate    182.9 MB  zfp     82.7 MB  max_err 0.359  rms_err 0.00118  (std 94.8, rms/std 1.2e-05)  masked 0
+    congruence: 35 blocks (35 matched)  max|dC5| 0.00388  mean|dC5| 0.000652  max|dW| 0.0043  weakest changed 0  rank rho 0.9989  top block same True  contrast max rel diff 3.51e-05  identical to ref: False
+
+--- rate=8: 459 M values, raw 2054 MB, deflate 1098 MB, ZFP 461 MB (8.0 bits/value, 2.38x smaller than deflate); 1 thread: inflate 8.1 s, ZFP decode 6.1 s, encode 9.3 s
+    ASTER ImageData10              8.0 b/v  deflate     23.5 MB  zfp     27.4 MB  max_err 0.103  rms_err 0.00141  (std 1.79, rms/std 0.00079)  masked 10095049
+    ASTER Latitude                 8.0 b/v  deflate    147.2 MB  zfp     27.3 MB  max_err 2.22e-05  rms_err 1.09e-07  (std 25.1, rms/std 4.3e-09)  masked 0
+    ASTER Longitude                8.0 b/v  deflate    163.3 MB  zfp     27.3 MB  max_err 2.01e-05  rms_err 2.54e-07  (std 76.1, rms/std 3.3e-09)  masked 0
+    MISR GeoLatitude               8.5 b/v  deflate     34.1 MB  zfp     12.6 MB  max_err 3.05e-05  rms_err 1.9e-06  (std 56.5, rms/std 3.4e-08)  masked 0
+    MISR GeoLongitude              8.5 b/v  deflate     35.8 MB  zfp     12.6 MB  max_err 5.42  rms_err 0.0319  (std 89.6, rms/std 0.00036)  masked 0
+    MISR Red_Radiance              8.0 b/v  deflate    225.4 MB  zfp    188.8 MB  max_err 7.57  rms_err 0.0967  (std 88, rms/std 0.0011)  masked 86289754
+    MODIS EV_1KM_Emissive          8.0 b/v  deflate    113.5 MB  zfp     55.1 MB  max_err 0.106  rms_err 0.00247  (std 2.22, rms/std 0.0011)  masked 1715
+    MODIS Latitude                 8.0 b/v  deflate    172.3 MB  zfp     55.1 MB  max_err 0.00193  rms_err 4.04e-05  (std 49.9, rms/std 8.1e-07)  masked 0
+    MODIS Longitude                8.0 b/v  deflate    182.9 MB  zfp     55.1 MB  max_err 7.35  rms_err 0.0267  (std 94.8, rms/std 0.00028)  masked 0
+    congruence: 35 blocks (35 matched)  max|dC5| 0.00392  mean|dC5| 0.000649  max|dW| 0.00442  weakest changed 0  rank rho 0.9994  top block same True  contrast max rel diff 0.00535  identical to ref: False
+
+--- rate=4: 459 M values, raw 2054 MB, deflate 1098 MB, ZFP 231 MB (4.0 bits/value, 4.76x smaller than deflate); 1 thread: inflate 8.1 s, ZFP decode 3.6 s, encode 7.0 s
+    ASTER ImageData10              4.0 b/v  deflate     23.5 MB  zfp     13.7 MB  max_err 1.58  rms_err 0.0219  (std 1.79, rms/std 0.012)  masked 10095049
+    ASTER Latitude                 4.0 b/v  deflate    147.2 MB  zfp     13.7 MB  max_err 0.00108  rms_err 6.6e-05  (std 25.1, rms/std 2.6e-06)  masked 0
+    ASTER Longitude                4.0 b/v  deflate    163.3 MB  zfp     13.7 MB  max_err 0.00189  rms_err 6.76e-05  (std 76.1, rms/std 8.9e-07)  masked 0
+    MISR GeoLatitude               4.3 b/v  deflate     34.1 MB  zfp      6.3 MB  max_err 0.0059  rms_err 0.000372  (std 56.5, rms/std 6.6e-06)  masked 0
+    MISR GeoLongitude              4.3 b/v  deflate     35.8 MB  zfp      6.3 MB  max_err 76.7  rms_err 0.493  (std 89.6, rms/std 0.0055)  masked 0
+    MISR Red_Radiance              4.0 b/v  deflate    225.4 MB  zfp     94.5 MB  max_err 169  rms_err 1.5  (std 88, rms/std 0.017)  masked 86289754
+    MODIS EV_1KM_Emissive          4.0 b/v  deflate    113.5 MB  zfp     27.6 MB  max_err 1.87  rms_err 0.0382  (std 2.22, rms/std 0.017)  masked 1715
+    MODIS Latitude                 4.0 b/v  deflate    172.3 MB  zfp     27.6 MB  max_err 0.0388  rms_err 0.00123  (std 49.9, rms/std 2.5e-05)  masked 0
+    MODIS Longitude                4.0 b/v  deflate    182.9 MB  zfp     27.6 MB  max_err 128  rms_err 0.432  (std 94.8, rms/std 0.0046)  masked 0
+    congruence: 35 blocks (35 matched)  max|dC5| 0.0119  mean|dC5| 0.00293  max|dW| 0.011  weakest changed 0  rank rho 0.9983  top block same True  contrast max rel diff 0.0409  identical to ref: False
+
+=== summary
+mode       bits/val vs deflate  max|dC5| mean|dC5| weakest rank rho identical
+lossless       14.6      1.31x         0         0       0   1.0000 True
+rate=24        24.1      0.79x  1.68e-05  3.85e-06       0   1.0000 False
+rate=16        16.1      1.19x   0.00423  0.000632       0   0.9989 False
+rate=12        12.1      1.59x   0.00388  0.000652       0   0.9989 False
+rate=8          8.0      2.38x   0.00392  0.000649       0   0.9994 False
+rate=4          4.0      4.76x    0.0119   0.00293       0   0.9983 False
+[17:28:51 +671s] removed the working copy
+[17:28:51 +671s] done

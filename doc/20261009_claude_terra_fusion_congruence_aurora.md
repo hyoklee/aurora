@@ -385,6 +385,65 @@ one `check` pass per file. Log: [`data/tf/pread_test_8949299.log`](../data/tf/pr
   `TF_PREAD_THREADS` should be lower, and the gain is unmeasured. The default
   stays `TF_PREAD=0`.
 
+## Lossy ZFP instead of deflate (follow-up, 2026-10-21, job 8950573, 1 node)
+
+ZFP codes 4^d blocks independently, and in fixed-rate mode every block has the
+same size, so unlike deflate it decodes in parallel within an array, on a GPU
+too (clio-core's one Intel-GPU codec is `zfp-sycl`, fixed rate). Before
+building a PVC decoder: what do ZFP-coded values do to congruence, and how much
+smaller are they? [`src/tf/tf_zfp_encode.py`](../src/tf/tf_zfp_encode.py)
+codes every chunked dataset the pipeline reads (ASTER TIR and geolocation,
+MODIS geolocation and band 31, MISR geolocation and `Red_Radiance`; all
+float32 except ASTER's float64 geolocation) one HDF5 chunk at a time, as an
+H5Z-ZFP filter would store it, decodes it with zfpy 1.0.1 on the CPU, and
+writes the decoded values into a copy of the granule with the original
+deflate, so the pipeline runs unchanged. Fill, NaN and out-of-range values
+(ZFP has no notion of them) are masked, replaced by the chunk mean before
+coding and restored exactly; the mask is counted in the ZFP size.
+[`pbs/tf_zfp_test.pbs`](../pbs/tf_zfp_test.pbs) ran the pipeline on the
+MISR-rechunked O33737 as the reference and once per mode, each coded from the
+untouched file. Log and per-field results:
+[`data/tf/zfp_test_8950573.log`](../data/tf/zfp_test_8950573.log),
+[`data/tf/zfp_8950573/`](../data/tf/zfp_8950573).
+
+| Mode | Size of the 459 M values read (deflate: 1,098 MB) | max\|dC5\| | mean\|dC5\| | Block rank ρ |
+| --- | --- | --- | --- | --- |
+| ZFP lossless (reversible) | 838 MB (1.31× smaller) | 0 | 0 | 1 (byte-identical output) |
+| 24 bits/value | 1,384 MB (larger) | 1.7e-5 | 3.9e-6 | 1.0000 |
+| 16 | 923 MB (1.19×) | 0.0042 | 0.0006 | 0.9989 |
+| 12 | 692 MB (1.59×) | 0.0039 | 0.0007 | 0.9989 |
+| 8 | 461 MB (2.38×) | 0.0039 | 0.0006 | 0.9994 |
+| 4 | 231 MB (4.76×) | 0.0119 | 0.0029 | 0.9983 |
+
+In every mode all 35 blocks kept their weakest sensor and the top block stayed
+on top.
+
+* **Lossy ZFP is not worth it here.** It is smaller than deflate only below
+  about 20 bits/value, and at 16 it already moves C5 by up to 0.004, about
+  10,000× the PVC-vs-pytaf difference that was still worth flagging in P108
+  (5.8e-7).
+* **dC5 is flat from 16 to 8 bits/value**, which looks like a step (a few cells
+  changing which pixel they regrid from) rather than error growing with the
+  rate. Longitude is the likely cause: MODIS and MISR longitude show max errors
+  of 0.03–0.36° at rates where latitude is nearly exact, consistent with
+  coding across the ±180° jump. Not traced.
+* **Lossless ZFP wins on geolocation and loses on radiances.** Latitude and
+  longitude: 736 MB with deflate, 307 MB with ZFP lossless (2.4×). Radiances:
+  362 MB with deflate, 531 MB with ZFP; their large fill regions (86 M of
+  MISR's values) suit deflate. ZFP lossless for geolocation plus deflate for
+  radiances would be 670 MB, 1.64× smaller than now with no value changed,
+  smaller than lossy 12 bits/value.
+* **ZFP does not decode faster on the CPU**: one thread took 8.8 s for lossless
+  and 6.1 s at 8 bits/value against 8.1 s for zlib. Parallel CPU inflate
+  (above) already brings the reads to about 1 s, so a PVC decoder has little
+  to gain.
+* **It barely shrinks the download.** The pipeline reads about 1.1 GB of
+  compressed data, but each granule is a 27 GB object, so re-encoding what is
+  read saves about 0.4 GB (~1.6%). A large saving needs the whole archive
+  re-encoded (other datasets not measured) or range reads of just these bytes.
+
+One granule; no decoding ran on the PVC.
+
 ## Caveats
 
 * **O10670's 5.8e-7 is not explained.** Only O10204 ran in check mode, and
@@ -412,6 +471,7 @@ qsub pbs/tf_p108.pbs                            # all of P108, 8 nodes, ~5 h
 qsub -v OMNI=$PWD/omni/terra_fusion_p108.omni.yaml,GRANULES="O33737 O18825",HBM_GB=0,CLEAN_PASSES=2,SKIP_REPORT=1 pbs/tf_congruence.pbs   # PVC vs pytaf, 20 min
 qsub pbs/tf_inflate_bench.pbs                   # deflate share + parallel inflate, 10 min
 qsub pbs/tf_pread_test.pbs                      # TF_PREAD=0/1/check vs HEAD (needs tf_inflate_bench data), 8 min
+qsub pbs/tf_zfp_test.pbs                        # lossy/lossless ZFP vs congruence (needs tf_inflate_bench data), 12 min
 python src/tf/tf_block_map.py <work>/O33737 13 P108/TERRA_BF_L1B_O33737_20060422005935_F000_V001.h5 out.png
 ```
 
