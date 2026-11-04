@@ -1,0 +1,171 @@
+#!/bin/bash
+#PBS -N cae_ibdp
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/cae_ibdp.out
+#PBS -e /home/hyoklee/wrp/run/cae_ibdp.err
+#
+# Ingest the whole Illinois Basin - Decatur Project dataset from CO2DataShare
+# with CAE's http(s) source: ../omni/ibdp_co2datashare.omni.yaml, 8 ZIP files,
+# 67.5 GB, into /lus/flare/projects/IOWarp/hyoklee/co2datashare/ibdp.
+#
+#   1. starts a CLIO runtime with the CAE and a small CTE (the CAE needs one),
+#   2. runs clio_cae on the OMNI file (transfers in order, smallest first),
+#   3. checks every file against the size CKAN lists, and tests every ZIP
+#      member's CRC (unzip -t), the archives in parallel.
+#
+# A file that already holds the right bytes is skipped, so if the walltime
+# runs out, qsub this again and it carries on with the next file.
+#
+# Needs: ~/.clio/cae_http_auth.ini with a [co2datashare.org] section (country
+# and affiliation; see the OMNI file), and a build from build_cae_http.pbs.
+#
+# Usage:
+#   qsub cae_ibdp_co2datashare.pbs
+#   qsub -v OMNI=/path/other.omni.yaml,SKIP_ZIPTEST=1 cae_ibdp_co2datashare.pbs
+
+set -eo pipefail
+WORK=/lus/flare/projects/IOWarp/hyoklee
+BIN=${BIN:-${WORK}/build_cae_http/bin}
+OMNI=${OMNI:-/home/hyoklee/aurora/omni/ibdp_co2datashare.omni.yaml}
+JOBID=${PBS_JOBID%%.*}
+RUN=${RUN:-${WORK}/co2datashare/run_${JOBID:-manual}}
+ONEAPI=/opt/aurora/26.26.0/oneapi/compiler/latest   # what BIN was built with
+PROXY=http://proxy.alcf.anl.gov:3128
+
+mkdir -p "$RUN"
+exec > >(tee -a "$RUN/job.log") 2>&1
+T0=$SECONDS
+ts() { echo "[$(date +%T) +$((SECONDS - T0))s] $*"; }
+ts "host=$(hostname) run=$RUN omni=$OMNI"
+ts "clio-core: $(git -C /home/hyoklee/clio-core.dev branch --show-current) $(git -C /home/hyoklee/clio-core.dev log --oneline -1)"
+
+# --- environment ------------------------------------------------------------
+# Set after sourcing oneAPI: environment scripts can drop http_proxy.
+source "${ONEAPI}/env/vars.sh" > /dev/null 2>&1
+export http_proxy=$PROXY https_proxy=$PROXY no_proxy=localhost,127.0.0.1
+export CLIO_SERVER_CONF=${RUN}/clio_server.yaml
+export CLIO_MEMFD_DIR=/tmp/clio_memfd_${JOBID:-manual}
+export CLIO_IPC_MODE=SHM
+export CTP_LOG_LEVEL=${CTP_LOG_LEVEL:-info}   # the assimilator's progress lines
+export CAE_HTTP_STREAMS=${CAE_HTTP_STREAMS:-16}
+export CAE_HTTP_PART_MB=${CAE_HTTP_PART_MB:-64}
+export CAE_HTTP_PROGRESS_S=${CAE_HTTP_PROGRESS_S:-60}
+mkdir -p "$CLIO_MEMFD_DIR"
+
+AUTH=${CAE_HTTP_AUTH_FILE:-$HOME/.clio/cae_http_auth.ini}
+grep -q '^\[co2datashare.org\]' "$AUTH" 2>/dev/null ||
+    { ts "ERROR: no [co2datashare.org] section in $AUTH; see the OMNI file"; exit 1; }
+
+# --- runtime ----------------------------------------------------------------
+# The files go straight to Lustre; the CTE only has to exist.
+cat > "$CLIO_SERVER_CONF" <<EOF
+memory:
+  main_segment_size: auto
+  client_data_segment_size: 1GB
+networking:
+  port: ${CLIO_PORT:-9413}
+runtime:
+  num_threads: 8
+  queue_depth: 1024
+compose:
+  - mod_name: clio_cae_core
+    pool_name: cae_main
+    pool_query: local
+    pool_id: "400.0"
+    next_pool_id: "512.0"
+  - mod_name: clio_cte_core
+    pool_name: cte_main
+    pool_query: local
+    pool_id: "512.0"
+    storage:
+      - path: "ram::ibdp_ram"
+        bdev_type: "ram"
+        capacity_limit: "4GB"
+        score: 1.0
+    dpe:
+      dpe_type: "max_bw"
+EOF
+
+RUNTIME_PID=""
+cleanup() {
+    set +e
+    if [ -n "$RUNTIME_PID" ]; then
+        ts "cleanup: stopping the runtime"
+        timeout 120 "${BIN}/clio_run" stop >> "${RUN}/runtime.log" 2>&1
+        for _ in $(seq 1 60); do kill -0 "$RUNTIME_PID" 2>/dev/null || break; sleep 1; done
+        kill -9 "$RUNTIME_PID" 2>/dev/null
+    fi
+    rm -rf "${CLIO_MEMFD_DIR:?}"
+}
+trap cleanup EXIT
+
+"${BIN}/clio_run" start --fresh --disk "${RUN}/data" --no-viz > "${RUN}/runtime.log" 2>&1 &
+RUNTIME_PID=$!
+for _ in $(seq 1 90); do
+    "${BIN}/clio_run" status > /dev/null 2>&1 && break
+    kill -0 "$RUNTIME_PID" 2>/dev/null || { ts "ERROR: runtime exited; see runtime.log"; tail -20 "${RUN}/runtime.log"; exit 1; }
+    sleep 2
+done
+"${BIN}/clio_run" status > /dev/null 2>&1 || { ts "ERROR: runtime not up after 180 s"; exit 1; }
+ts "runtime up; streams=${CAE_HTTP_STREAMS} x ${CAE_HTTP_PART_MB} MiB"
+
+# --- ingest -----------------------------------------------------------------
+# Progress lines come from the runtime (it runs the assimilator); follow them.
+tail -n 0 -F "${RUN}/runtime.log" 2>/dev/null | grep --line-buffered -E 'HttpFileAssimilator' &
+TAIL_PID=$!
+t=$SECONDS
+rc=0
+"${BIN}/clio_cae" "$OMNI" > "${RUN}/cae.log" 2>&1 || rc=$?
+INGEST_SECS=$((SECONDS - t))
+sleep 1; kill "$TAIL_PID" 2>/dev/null || true
+if [ "$rc" -ne 0 ]; then
+    ts "INGEST FAILED (clio_cae rc=$rc after ${INGEST_SECS}s); see cae.log and runtime.log"
+    tail -5 "${RUN}/cae.log"
+    grep -E 'ERROR|FAILED' "${RUN}/runtime.log" | tail -5
+fi
+ts "clio_cae finished in ${INGEST_SECS}s (rc=$rc)"
+
+# --- verify -----------------------------------------------------------------
+# Expected sizes are the "# N bytes" comments on each src line of the OMNI.
+ts "verify: sizes"
+bad=0 total=0
+declare -a FILES
+while IFS=$'\t' read -r size dst; do
+    have=$(stat -c %s "$dst" 2>/dev/null || echo missing)
+    total=$((total + ${have//missing/0}))
+    if [ "$have" = "$size" ]; then
+        printf '  OK      %15s  %s\n' "$size" "$(basename "$dst")"
+        FILES+=("$dst")
+    else
+        printf '  BAD     %15s  %s (have %s)\n' "$size" "$(basename "$dst")" "$have"
+        bad=$((bad + 1))
+    fi
+done < <(awk '
+    /src:/ { n = 0; if (match($0, /# [0-9,]+ bytes/)) { s = substr($0, RSTART + 2, RLENGTH - 8); gsub(",", "", s); n = s } }
+    /dst:/ { sub(/.*file::/, ""); gsub(/"/, ""); print n "\t" $0 }' "$OMNI")
+ts "verify: ${#FILES[@]} files the right size, $bad not; $((total / 1000000)) MB on disk, $((INGEST_SECS > 0 ? total / 1000000 / INGEST_SECS : 0)) MB/s over this run"
+parts=$(find "${WORK}/co2datashare" -name '*.cae-part' 2>/dev/null)
+[ -n "$parts" ] && ts "warning: partial files left: $parts"
+
+if [ "${SKIP_ZIPTEST:-0}" != 1 ] && [ "${#FILES[@]}" -gt 0 ]; then
+    ts "verify: unzip -t (every member's CRC), ${#FILES[@]} archives in parallel"
+    pids=()
+    for f in "${FILES[@]}"; do
+        ( if out=$(unzip -tqq "$f" 2>&1); then echo "  CRC OK  $(basename "$f")"
+          else echo "  CRC BAD $(basename "$f"): $(echo "$out" | tail -2)"; exit 1; fi ) &
+        pids+=($!)
+    done
+    zbad=0
+    for p in "${pids[@]}"; do wait "$p" || zbad=$((zbad + 1)); done
+    ts "verify: $zbad archive(s) failed the CRC test"
+    bad=$((bad + zbad))
+fi
+
+echo "=== runtime errors: $(grep -c ' ERROR ' "${RUN}/runtime.log" || true)"
+grep -E 'HttpFileAssimilator: .* (done|skipped)' "${RUN}/runtime.log" | sed 's/^.*HttpFileAssimilator: /  /' || true
+ts "done: rc=$rc bad=$bad"
+[ "$rc" -eq 0 ] && [ "$bad" -eq 0 ]

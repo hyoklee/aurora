@@ -1,0 +1,89 @@
+#!/bin/bash
+#PBS -N build_cae_http
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A IOWarp
+#PBS -o /home/hyoklee/wrp/run/build_cae_http.out
+#PBS -e /home/hyoklee/wrp/run/build_cae_http.err
+#
+# Build CAE from ~/clio-core.dev (branch feat/cae-http-source) with the new
+# http(s):// source, plus S3 as before, and run its offline unit test.
+#
+# Same dependencies as build_cae_s3.pbs (Poco from ~/miniconda3, the AWS SDK
+# that job installed under ${WORK}/deps). The http(s) source itself needs only
+# curl at run time.
+#
+# Usage:
+#   qsub build_cae_http.pbs
+
+set -eo pipefail
+export http_proxy=http://proxy.alcf.anl.gov:3128
+export https_proxy=http://proxy.alcf.anl.gov:3128
+
+SRC=/home/hyoklee/clio-core.dev
+WORK=/lus/flare/projects/IOWarp/hyoklee
+BUILD=${WORK}/build_cae_http
+AWS_PREFIX=${WORK}/deps/aws-sdk-cpp-1.11.599
+POCO_DIR=/home/hyoklee/miniconda3/lib/cmake/Poco
+CEREAL_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/cereal
+ZEROMQ_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/ZeroMQ
+MSGPACK_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/msgpack-c
+NLOHMANN_JSON_DIR=/home/hyoklee/miniconda3/share/cmake/nlohmann_json
+ONEAPI=/opt/aurora/26.26.0/oneapi/compiler/latest
+CMAKE=/home/hyoklee/miniconda3/bin/cmake
+JOBS=$(nproc)
+LOG=/home/hyoklee/wrp/run/build_cae_http_run.log
+
+mkdir -p "$(dirname "$LOG")"
+: > "$LOG"
+exec > >(tee -a "$LOG") 2>&1
+echo "[$(date)] host=$(hostname) source: $(git -C "$SRC" branch --show-current) $(git -C "$SRC" log --oneline -1)"
+
+configure() {   # configure <ON|OFF for tests>
+    $CMAKE -S "$SRC" -B "$BUILD" \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_C_COMPILER=${ONEAPI}/bin/icx \
+        -DCMAKE_CXX_COMPILER=${ONEAPI}/bin/icpx \
+        -DCMAKE_PREFIX_PATH="${AWS_PREFIX}" \
+        -DCMAKE_BUILD_RPATH="${AWS_PREFIX}/lib" \
+        -DPoco_DIR="$POCO_DIR" \
+        -Dcereal_DIR="$CEREAL_DIR" \
+        -DZeroMQ_DIR="$ZEROMQ_DIR" \
+        -Dmsgpack-c_DIR="$MSGPACK_DIR" \
+        -Dnlohmann_json_DIR="$NLOHMANN_JSON_DIR" \
+        -DCMAKE_EXE_LINKER_FLAGS="" \
+        -DCMAKE_SHARED_LINKER_FLAGS="" \
+        -DCMAKE_MODULE_LINKER_FLAGS="" \
+        -DCLIO_CORE_ENABLE_CAE=ON \
+        -DCAE_ENABLE_S3=ON \
+        -DCLIO_CORE_ENABLE_SYCL=OFF \
+        -DCLIO_CTP_ENABLE_SYCL=OFF \
+        -DCLIO_CORE_ENABLE_TESTS="$1"
+}
+
+echo "=== [1] Configure (CAE + S3 + HTTP) -> ${BUILD} ==="
+configure OFF 2>&1 | tee "${BUILD}.configure.log"
+grep -q 'CAE HTTP(S) support: ENABLED' "${BUILD}.configure.log" ||
+    { echo "ERROR: CAE HTTP(S) support not enabled" >&2; exit 1; }
+
+echo "=== [2] Build ==="
+$CMAKE --build "$BUILD" -j "$JOBS"
+
+echo "=== [3] Check binaries ==="
+for exe in clio_run clio_cae cae_http_tool; do
+    test -x "${BUILD}/bin/${exe}" || { echo "ERROR: ${exe} not built" >&2; exit 1; }
+    echo "OK ${BUILD}/bin/${exe}"
+done
+
+echo "=== [4] Unit test: http(s) config rules (offline) ==="
+configure ON > /dev/null
+$CMAKE --build "$BUILD" -j "$JOBS" --target cae_http_auth_test
+(cd "$BUILD" && "${CMAKE%cmake}ctest" -R '^cae_http_auth$' --output-on-failure)
+
+echo "=== [5] Smoke test: probe one IBDP file through the proxy ==="
+"${BUILD}/bin/cae_http_tool" probe \
+    https://co2datashare.org/dataset/62ccf48d-6d58-4c88-8abb-9e3ab6e5ca3d/resource/6eecec43-a77a-410c-a8c7-6fec1465d9b8/download/seismic-event-catalog.zip
+
+echo "[$(date)] Done. CAE with HTTP(S): ${BUILD}/bin/clio_cae"
