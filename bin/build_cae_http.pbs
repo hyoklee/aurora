@@ -31,6 +31,7 @@ CEREAL_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/cereal
 ZEROMQ_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/ZeroMQ
 MSGPACK_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/msgpack-c
 NLOHMANN_JSON_DIR=/home/hyoklee/miniconda3/share/cmake/nlohmann_json
+CATCH2_DIR=/home/hyoklee/miniconda3/envs/iowarp/lib/cmake/Catch2
 ONEAPI=/opt/aurora/26.26.0/oneapi/compiler/latest
 CMAKE=/home/hyoklee/miniconda3/bin/cmake
 JOBS=$(nproc)
@@ -53,6 +54,7 @@ configure() {   # configure <ON|OFF for tests>
         -DZeroMQ_DIR="$ZEROMQ_DIR" \
         -Dmsgpack-c_DIR="$MSGPACK_DIR" \
         -Dnlohmann_json_DIR="$NLOHMANN_JSON_DIR" \
+        -DCatch2_DIR="$CATCH2_DIR" \
         -DCMAKE_EXE_LINKER_FLAGS="" \
         -DCMAKE_SHARED_LINKER_FLAGS="" \
         -DCMAKE_MODULE_LINKER_FLAGS="" \
@@ -60,7 +62,8 @@ configure() {   # configure <ON|OFF for tests>
         -DCAE_ENABLE_S3=ON \
         -DCLIO_CORE_ENABLE_SYCL=OFF \
         -DCLIO_CTP_ENABLE_SYCL=OFF \
-        -DCLIO_CORE_ENABLE_TESTS="$1"
+        -DCLIO_CORE_ENABLE_TESTS="$1" \
+        -DBUILD_TESTING="$1"
 }
 
 echo "=== [1] Configure (CAE + S3 + HTTP) -> ${BUILD} ==="
