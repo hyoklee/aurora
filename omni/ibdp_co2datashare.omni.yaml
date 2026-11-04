@@ -1,0 +1,67 @@
+# OMNI
+name: ibdp_co2datashare
+tags: co2,ccs,decatur,illinois-basin,co2datashare,public-data
+
+# Illinois Basin - Decatur Project (IBDP) dataset, every resource of
+#   https://co2datashare.org/dataset/illinois-basin-decatur-project-dataset
+#   DOI 10.11582/2022.00017, Illinois State Geological Survey.
+#   8 ZIP files, 67,516,839,498 bytes (sizes below are CKAN's, from
+#   /api/3/action/package_show; the run checks every file against them).
+#   Smallest first, so a problem with the site shows up in seconds.
+#
+# Licence: IBDP CO2 Injection Datasets License (CC BY 4.0, except that the
+#   data may not be sold and the licence covers all data in the dataset).
+#   Credit: Illinois State Geological Survey (ISGS), Illinois Basin - Decatur
+#   Project (IBDP) CO2 Injection Monitoring Data, April 30, 2021. Midwest
+#   Geological Sequestration Consortium (MGSC) Phase III Data Sets. DOE
+#   Cooperative Agreement No. DE-FC26-05NT42588. Accepted by hyoklee on
+#   2026-11-04.
+#
+# Access: no account is needed, but the site serves a file only to a request
+#   that carries the download form's country and affiliation. Those are not
+#   OMNI fields; the CAE http(s) source reads them from its config file,
+#   ~/.clio/cae_http_auth.ini (or $CAE_HTTP_AUTH_FILE):
+#
+#     [co2datashare.org]
+#     query.country = United States
+#     query.affiliation = The HDF Group
+#
+#   Without that section every URL below answers HTTP 400.
+#
+# Destination: file::<path>, the IOWarp project's Lustre space on Aurora
+#   (/lus/flare/projects/IOWarp/hyoklee). A file that already holds the
+#   source's bytes is skipped, so a run that stopped part way can be re-run.
+#
+# Environment of the CLIO runtime (which runs the assimilator):
+#   https_proxy=http://proxy.alcf.anl.gov:3128   (compute nodes)
+#   CAE_HTTP_STREAMS=16   ranged GETs in flight per file
+#   CAE_HTTP_PART_MB=64   bytes per ranged GET
+#     Measured from a login node (512 MB slice of the 37.8 GB file):
+#     1 stream 8.1 MB/s, 8 x 64 MiB 37.3 MB/s.
+#   Run it with ../pbs/cae_ibdp_co2datashare.pbs.
+
+transfers:
+  - src: "https://co2datashare.org/dataset/62ccf48d-6d58-4c88-8abb-9e3ab6e5ca3d/resource/083807ce-15ee-496f-bb69-5065709591d1/download/ibdp_horizons-faults_petrel_2021.zip"   # 7,674,425 bytes: Horizons and faults exported from Petrel model
+    dst: "file::/lus/flare/projects/IOWarp/hyoklee/co2datashare/ibdp/ibdp_horizons-faults_petrel_2021.zip"
+    format: "binary"
+  - src: "https://co2datashare.org/dataset/62ccf48d-6d58-4c88-8abb-9e3ab6e5ca3d/resource/6eecec43-a77a-410c-a8c7-6fec1465d9b8/download/seismic-event-catalog.zip"   # 9,507,198 bytes: Seismic Event Catalog
+    dst: "file::/lus/flare/projects/IOWarp/hyoklee/co2datashare/ibdp/seismic-event-catalog.zip"
+    format: "binary"
+  - src: "https://co2datashare.org/dataset/62ccf48d-6d58-4c88-8abb-9e3ab6e5ca3d/resource/80886ae0-72e2-4bd4-93eb-f226b800760a/download/ibdp_reports.zip"   # 292,289,464 bytes: Reports
+    dst: "file::/lus/flare/projects/IOWarp/hyoklee/co2datashare/ibdp/ibdp_reports.zip"
+    format: "binary"
+  - src: "https://co2datashare.org/dataset/62ccf48d-6d58-4c88-8abb-9e3ab6e5ca3d/resource/619bfa9f-6093-4692-830c-443f55a1c289/download/ibdp_well_information.zip"   # 322,419,753 bytes: Well Information
+    dst: "file::/lus/flare/projects/IOWarp/hyoklee/co2datashare/ibdp/ibdp_well_information.zip"
+    format: "binary"
+  - src: "https://co2datashare.org/dataset/62ccf48d-6d58-4c88-8abb-9e3ab6e5ca3d/resource/5527c344-bad4-484e-9a8d-778a62836638/download/ibdp_selected_reports.zip"   # 352,941,394 bytes: Selected Reports
+    dst: "file::/lus/flare/projects/IOWarp/hyoklee/co2datashare/ibdp/ibdp_selected_reports.zip"
+    format: "binary"
+  - src: "https://co2datashare.org/dataset/62ccf48d-6d58-4c88-8abb-9e3ab6e5ca3d/resource/7f03c756-0a6e-4450-b7fd-7401bb8af7f6/download/ibdp_gis_data_and_georeferenced_imagery.zip"   # 13,312,364,398 bytes: GIS Data and Georeferenced Imagery
+    dst: "file::/lus/flare/projects/IOWarp/hyoklee/co2datashare/ibdp/ibdp_gis_data_and_georeferenced_imagery.zip"
+    format: "binary"
+  - src: "https://co2datashare.org/dataset/62ccf48d-6d58-4c88-8abb-9e3ab6e5ca3d/resource/5695a8c7-aa1a-471e-a270-7ed8d473ceb9/download/ibdp_seismic.zip"   # 15,437,891,729 bytes: Seismic data
+    dst: "file::/lus/flare/projects/IOWarp/hyoklee/co2datashare/ibdp/ibdp_seismic.zip"
+    format: "binary"
+  - src: "https://co2datashare.org/dataset/62ccf48d-6d58-4c88-8abb-9e3ab6e5ca3d/resource/ddd59692-f7eb-44b5-80e0-26d70f9c3817/download/ibdp_final_petrel_static_model_2021.zip"   # 37,781,751,137 bytes: IBDP Final Petrel Static Model 2021
+    dst: "file::/lus/flare/projects/IOWarp/hyoklee/co2datashare/ibdp/ibdp_final_petrel_static_model_2021.zip"
+    format: "binary"
