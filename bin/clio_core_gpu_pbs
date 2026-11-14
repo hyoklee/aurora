@@ -1,0 +1,80 @@
+#!/bin/bash
+# Submit a ctest -D Experimental job for clio-core to Aurora via PBS.
+# Uses Intel oneAPI compiler (icpx -fsycl) targeting Aurora Intel GPU (PVC).
+# CDash submission runs on the compute node via the ALCF HTTP proxy.
+
+REPO=/home/hyoklee/clio-core
+LOG=/home/hyoklee/log/clio_core_gpu.out
+JOBSCRIPT=$(mktemp /tmp/clio_core_gpu_pbs_XXXXXX.sh)
+
+cat > "${JOBSCRIPT}" <<'PBSEOF'
+#!/bin/bash
+#PBS -N clio_core_gpu
+#PBS -q capacity
+#PBS -l select=1
+#PBS -A radix-io
+#PBS -l filesystems=home:flare
+#PBS -l walltime=02:00:00
+#PBS -o /home/hyoklee/log/clio_core_gpu.out
+#PBS -j oe
+
+# ---- environment ----
+module load gcc/13.4.0
+module load oneapi/release/2025.3.1
+
+source /home/hyoklee/miniconda3/etc/profile.d/conda.sh
+conda activate iowarp
+
+export PATH="/home/hyoklee/miniconda3/bin:$PATH"
+export LD_LIBRARY_PATH="/home/hyoklee/miniconda3/envs/iowarp/lib:${LD_LIBRARY_PATH}"
+
+# Proxy for CDash submission (compute nodes have no direct internet access)
+export http_proxy="http://proxy.alcf.anl.gov:3128"
+export https_proxy="http://proxy.alcf.anl.gov:3128"
+export ftp_proxy="http://proxy.alcf.anl.gov:3128"
+
+REPO=/home/hyoklee/clio-core
+BUILD=/lus/flare/projects/IOWarp/hyoklee/build_clio_core_gpu
+CTEST=/home/hyoklee/miniconda3/bin/ctest
+CMAKE=/home/hyoklee/miniconda3/bin/cmake
+CONDA_LIB=/home/hyoklee/miniconda3/envs/iowarp/lib
+
+echo "=== core_gpu: ctest -D Continuous (Intel oneAPI / Aurora GPU) ==="
+echo "=== Host: $(hostname)  Date: $(date) ==="
+echo "=== Compiler: $(icpx --version 2>&1 | head -1) ==="
+
+# Configure if no cache present
+if [ ! -f "${BUILD}/CMakeCache.txt" ]; then
+    echo "=== Configuring build ==="
+    CC=icx CXX=icpx ${CMAKE} --preset sycl-debug \
+        -S "${REPO}" -B "${BUILD}" \
+        -DSITE='aurora' \
+        -DBUILDNAME='sycl/d/cnd/gpu' \
+        -DCMAKE_EXE_LINKER_FLAGS="-L${CONDA_LIB} -Wl,-rpath,${CONDA_LIB}" \
+        -DCMAKE_SHARED_LINKER_FLAGS="-L${CONDA_LIB} -Wl,-rpath,${CONDA_LIB}" \
+        -DCMAKE_MODULE_LINKER_FLAGS="-L${CONDA_LIB} -Wl,-rpath,${CONDA_LIB}"
+else
+    # Inject site/build name into existing cache
+    ${CMAKE} -S "${REPO}" -B "${BUILD}" \
+        -DSITE='aurora' \
+        -DBUILDNAME='d/cnd/gpu'
+fi
+
+echo "=== Building all targets ==="
+${CMAKE} --build "${BUILD}" -j4
+
+echo "=== Running ctest -D Continuous ==="
+cd "${BUILD}"
+${CTEST} -D Continuous -j4 --output-on-failure -LE docker
+
+echo "=== Finished with exit code $? at $(date) ==="
+PBSEOF
+
+chmod +x "${JOBSCRIPT}"
+echo "Submitting PBS job for ctest -D Continuous (Intel GPU / SYCL)..."
+JOBID=$(qsub "${JOBSCRIPT}")
+rm -f "${JOBSCRIPT}"
+
+echo "Submitted: ${JOBID}"
+echo "Output:    ${LOG}"
+echo "Monitor:   qstat -x ${JOBID%%.*}"
