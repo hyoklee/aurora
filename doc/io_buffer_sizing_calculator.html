@@ -1,0 +1,180 @@
+
+<style>
+.brow { display:flex; align-items:center; gap:10px; margin:8px 0; }
+.blabel { font-size:12px; color:var(--color-text-secondary); min-width:160px; }
+.bval { font-size:13px; font-weight:500; color:var(--color-text-primary); min-width:72px; text-align:right; }
+.bar-track { flex:1; height:8px; background:var(--color-background-secondary); border-radius:4px; overflow:hidden; }
+.bar-fill { height:100%; border-radius:4px; transition:width 0.3s; }
+.tier-card { background:var(--color-background-secondary); border:0.5px solid var(--color-border-tertiary); border-radius:var(--border-radius-lg); padding:14px 16px; margin:10px 0; }
+.tier-title { font-size:13px; font-weight:500; color:var(--color-text-primary); margin-bottom:4px; }
+.tier-sub { font-size:11px; color:var(--color-text-secondary); margin-bottom:10px; }
+.result-num { font-size:22px; font-weight:500; color:var(--color-text-primary); }
+.result-unit { font-size:13px; color:var(--color-text-secondary); margin-left:4px; }
+.warning { background:var(--color-background-warning); border:0.5px solid var(--color-border-warning); border-radius:var(--border-radius-md); padding:8px 12px; font-size:12px; color:var(--color-text-warning); margin-top:6px; display:none; }
+</style>
+
+<h2 class="sr-only">Interactive I/O buffer sizing calculator for AI agents on Aurora supercomputer</h2>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:14px;">
+  <div>
+    <label style="font-size:12px;color:var(--color-text-secondary);">Model size (B params)</label>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+      <input type="range" id="model" min="7" max="1000" value="70" step="1" style="flex:1">
+      <span id="model-out" style="font-size:13px;font-weight:500;min-width:52px;text-align:right">70 B</span>
+    </div>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--color-text-secondary);">Sequence length (tokens)</label>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+      <input type="range" id="seqlen" min="512" max="32768" value="4096" step="512" style="flex:1">
+      <span id="seqlen-out" style="font-size:13px;font-weight:500;min-width:52px;text-align:right">4096</span>
+    </div>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--color-text-secondary);">Batch size (sequences)</label>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
+      <input type="range" id="batch" min="1" max="64" value="8" step="1" style="flex:1">
+      <span id="batch-out" style="font-size:13px;font-weight:500;min-width:52px;text-align:right">8</span>
+    </div>
+  </div>
+  <div>
+    <label style="font-size:12px;color:var(--color-text-secondary);">Precision</label>
+    <div style="display:flex;gap:6px;margin-top:4px;">
+      <button id="btn-int4" onclick="setPrec('int4')" style="flex:1;font-size:12px;padding:5px 0;">INT4</button>
+      <button id="btn-bf16" onclick="setPrec('bf16')" style="flex:1;font-size:12px;padding:5px 0;">BF16</button>
+      <button id="btn-fp32" onclick="setPrec('fp32')" style="flex:1;font-size:12px;padding:5px 0;">FP32</button>
+    </div>
+  </div>
+</div>
+
+<div class="tier-card">
+  <div class="tier-title">Tier 1 · DAOS read chunk (per RPC)</div>
+  <div class="tier-sub">Optimal single daos_array_read() transfer — balance RPC overhead vs cache thrashing</div>
+  <div style="display:flex;align-items:baseline;gap:6px;">
+    <span id="t1-val" class="result-num">8</span><span class="result-unit">MB per shard</span>
+  </div>
+  <div class="brow" style="margin-top:8px;">
+    <span class="blabel">RPC efficiency</span>
+    <div class="bar-track"><div id="t1-bar" class="bar-fill" style="background:#1D9E75;width:70%"></div></div>
+    <span id="t1-eff" class="bval">good</span>
+  </div>
+</div>
+
+<div class="tier-card">
+  <div class="tier-title">Tier 2 · CPU→GPU double buffer (per tile)</div>
+  <div class="tier-sub">PCIe DMA prefetch size — must transfer in less time than one compute step</div>
+  <div style="display:flex;align-items:baseline;gap:6px;">
+    <span id="t2-val" class="result-num">512</span><span class="result-unit">MB per buffer</span>
+  </div>
+  <div class="brow" style="margin-top:8px;">
+    <span class="blabel">Transfer vs compute</span>
+    <div class="bar-track"><div id="t2-bar" class="bar-fill" style="background:#185FA5;width:55%"></div></div>
+    <span id="t2-eff" class="bval">balanced</span>
+  </div>
+  <div id="t2-warn" class="warning">Transfer time may exceed compute time — increase batch size or reduce precision</div>
+</div>
+
+<div class="tier-card">
+  <div class="tier-title">Tier 3 · GPU HBM working set breakdown</div>
+  <div class="tier-sub">Total HBM needed per node — Aurora has 128 GB per tile pair (6 tiles = 768 GB/node)</div>
+  <div class="brow">
+    <span class="blabel">Model weight shard</span>
+    <div class="bar-track"><div id="t3-wbar" class="bar-fill" style="background:#185FA5"></div></div>
+    <span id="t3-w" class="bval">—</span>
+  </div>
+  <div class="brow">
+    <span class="blabel">KV cache</span>
+    <div class="bar-track"><div id="t3-kbar" class="bar-fill" style="background:#BA7517"></div></div>
+    <span id="t3-k" class="bval">—</span>
+  </div>
+  <div class="brow">
+    <span class="blabel">Activations buffer</span>
+    <div class="bar-track"><div id="t3-abar" class="bar-fill" style="background:#1D9E75"></div></div>
+    <span id="t3-a" class="bval">—</span>
+  </div>
+  <div style="border-top:0.5px solid var(--color-border-tertiary);margin-top:8px;padding-top:8px;display:flex;justify-content:space-between;align-items:baseline;">
+    <span style="font-size:12px;color:var(--color-text-secondary);">Total HBM needed (1 node)</span>
+    <span id="t3-total" style="font-size:16px;font-weight:500;color:var(--color-text-primary);">—</span>
+  </div>
+  <div id="t3-warn" class="warning">Exceeds single-node HBM — model must be sharded across multiple nodes via pipeline/tensor parallelism</div>
+</div>
+
+<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;">
+  <span style="font-size:12px;color:var(--color-text-secondary);">Minimum Aurora nodes needed</span>
+  <span id="nodes-needed" style="font-size:16px;font-weight:500;color:var(--color-text-primary);">1 node</span>
+</div>
+
+<script>
+let prec = 'bf16';
+const bytesPerParam = {int4: 0.5, bf16: 2, fp32: 4};
+const NODE_HBM_GB = 768;
+
+function setPrec(p) {
+  prec = p;
+  ['int4','bf16','fp32'].forEach(x => {
+    document.getElementById('btn-'+x).style.background = x===p ? 'var(--color-background-info)' : '';
+    document.getElementById('btn-'+x).style.color = x===p ? 'var(--color-text-info)' : '';
+  });
+  calc();
+}
+
+function fmt(gb) {
+  if (gb < 1) return (gb*1024).toFixed(0)+' MB';
+  if (gb < 1000) return gb.toFixed(1)+' GB';
+  return (gb/1024).toFixed(2)+' TB';
+}
+
+function calc() {
+  const modelB = +document.getElementById('model').value;
+  const seqlen = +document.getElementById('seqlen').value;
+  const batch  = +document.getElementById('batch').value;
+  document.getElementById('model-out').textContent  = modelB+'B';
+  document.getElementById('seqlen-out').textContent = seqlen.toLocaleString();
+  document.getElementById('batch-out').textContent  = batch;
+
+  const bpp = bytesPerParam[prec];
+
+  const weightGB = modelB * 1e9 * bpp / 1e9;
+  const weightShardGB = weightGB / 6;
+
+  const numLayers = Math.round(Math.log(modelB) * 9 + 10);
+  const numHeads  = 32;
+  const headDim   = 128;
+  const kvGB = 2 * numLayers * numHeads * headDim * seqlen * batch * bpp / 1e9;
+  const actGB = seqlen * batch * headDim * numLayers * bpp / 1e9;
+
+  const totalGB = weightShardGB + kvGB + actGB;
+  const nodesNeeded = Math.ceil(totalGB / NODE_HBM_GB);
+
+  const daosChunkMB = Math.min(16, Math.max(1, Math.round(weightShardGB * 1024 / 200)));
+  document.getElementById('t1-val').textContent = daosChunkMB;
+  const rpcEff = Math.min(100, Math.round(daosChunkMB / 16 * 100));
+  document.getElementById('t1-bar').style.width = rpcEff+'%';
+  document.getElementById('t1-eff').textContent = rpcEff > 60 ? 'good' : rpcEff > 30 ? 'fair' : 'poor';
+
+  const dmaGB = Math.min(2, Math.max(0.25, weightShardGB / 20));
+  document.getElementById('t2-val').textContent = dmaGB >= 1 ? dmaGB.toFixed(1)+' GB' : Math.round(dmaGB*1024)+' MB';
+  const pcieBW = 64;
+  const transferMs = dmaGB * 1024 / pcieBW * 1000;
+  const computeMs  = seqlen * batch * 0.5;
+  const ratio = Math.min(1, computeMs / transferMs);
+  document.getElementById('t2-bar').style.width = Math.round(ratio*100)+'%';
+  document.getElementById('t2-eff').textContent = ratio > 0.8 ? 'balanced' : ratio > 0.5 ? 'fair' : 'stalling';
+  document.getElementById('t2-warn').style.display = ratio < 0.5 ? 'block' : 'none';
+
+  const maxBar = Math.max(weightShardGB, kvGB, actGB, 1);
+  document.getElementById('t3-wbar').style.width = Math.round(weightShardGB/maxBar*100)+'%';
+  document.getElementById('t3-kbar').style.width = Math.round(kvGB/maxBar*100)+'%';
+  document.getElementById('t3-abar').style.width = Math.round(actGB/maxBar*100)+'%';
+  document.getElementById('t3-w').textContent = fmt(weightShardGB);
+  document.getElementById('t3-k').textContent = fmt(kvGB);
+  document.getElementById('t3-a').textContent = fmt(actGB);
+  document.getElementById('t3-total').textContent = fmt(totalGB);
+
+  document.getElementById('t3-warn').style.display = totalGB > NODE_HBM_GB ? 'block' : 'none';
+  document.getElementById('nodes-needed').textContent = nodesNeeded === 1 ? '1 node' : nodesNeeded+' nodes';
+}
+
+['model','seqlen','batch'].forEach(id => document.getElementById(id).addEventListener('input', calc));
+setPrec('bf16');
+</script>

@@ -1,0 +1,24 @@
+AI AT THE ALCF
+
+Mistral Large 4 Is Now Available
+We have added Mistral Large 4 to the ALCF Inference Service. Additionally, we have accelerated the inference serving performance of Mistral by a factor as well. Models in the ALCF Inference include includes Meta’s Muse-spark-open, Refection.ai’s Beam and NVIDIA’s Nemotron 3.5 Super VL. These models are configured with a context length of 1 million and represent some of the state-of-the-art open-weight models. For a complete list of models being served, visit: https://docs.alcf.anl.gov/services/inference-endpoints/models/. If you need AI models hosted, please reach out to us at support@alcf.anl.gov.
+
+Genesis Agent Skills Released 
+DOE has released Genesis Agent Skills, a free collection of reusable instructions, workflows, and tools developed to support the Genesis Mission. The package helps researchers use AI coding assistants for tasks such as scientific workflows, data management, code evaluation, and AI safety. Compatible with tools such as Claude Code, Codex, and Gemini CLI, the skills allow researchers to access specialized guidance through plain-language requests. To access the Genesis Agent Skills, visit: https://gitlab.osti.gov/genesis/genesis-skills
+
+New Models Available Through ALCF Inference
+We have added the following models to the ALCF Inference Service.  This includes Meta's Muse-spark-open, Refection.ai's Beam and NVIDIA's Nemotron 3.5 Super VL. These models are configured with a context length of 1 million and represent some of the state-of-the-art open-weight models. For a complete list of models being served, visit: https://docs.alcf.anl.gov/services/inference-endpoints/models/. If you need AI models hosted, please reach out to us at support@alcf.anl.gov
+
+Inference WebUI and PDF Document Handling Improvements
+We have made several improvements to the UI to make it more intuitive for users. We have also improved document handling, especially for PDF documents. For details, visit: https://docs.alcf.anl.gov/services/inference-endpoints/models/
+
+AI Frameworks Module on Aurora
+The default compute image on Aurora has been updated with frameworks/2026.1.0 containing PyTorch/2.13.0 and vllm/0.26.1. We have enabled asynchronous collective operations globally and this enable several performance improvements due to communication and computation overlaps.  Known issues are listed here: https://docs.alcf.anl.gov/aurora/data-science/frameworks/
+
+Tara System Deployed to Accelerate AI Inference
+Tara has been deployed to ALCF AI Inference Service. Developed in collaboration with Hewlett Packard Enterprise, Tara has 672 nodes equipped with a total of 2,688 NVIDIA GH200 Grace Hopper Superchips. Tara alone provides roughly 100 times the GPU memory previously available to the service, significantly increasing its capacity to serve models and users. 
+
+ALCF Inference Service Supports a Variety of Agents
+Get started with using models served by ALCF Inference with your favorite agentic harness. Support for Pi, OpenCode, Codex, and Claude Code is available and documented at: https://docs.alcf.anl.gov/services/inference-endpoints/#agents
+You can quickly configure most agents to use the ALCF Inference Service endpoints with alcf-ai package. This also handles authentication, obtaining API keys from the service, among others. More information at: https://pypi.org/project/alcf-ai/
+Use alcf-tokens (https://pypi.org/project/alcf-tokens/) to log in once and automatically fetch and refresh access tokens for the ALCF Inference Service, Facility API, Globus Compute, Globus Transfer, and Globus Flows. This tool provides command line and Python interfaces to streamline multi-service authentication for your workflows. 
