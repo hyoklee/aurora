@@ -148,7 +148,17 @@ per-run artifacts and logs: `bench/qick/runs/`.
   `src/qick/ss_fidelity.py`. All first-round runs were discarded and kept in `bench/qick/invalid/`; the
   table uses only reruns in out-of-repo workspaces, which were checked for leakage (no references to
   `src/qick`, `ss_fidelity` or the repo CLAUDE.md).
-* Retries are kept in `bench/qick/invalid/` as well (`*_try2`, `*_try3`, `*_try1_api400-images`).
+* Retries are kept in `bench/qick/invalid/` as well (`*_try2`, `*_try1_api400-images`).
+* **Isolation is not airtight for shell-capable agents.** A third CLIO Agent + beam attempt (run only to
+  measure reliability) used the absolute path `/home/hyoklee/aurora/src/qick/ss_fidelity.py`. The server log
+  shows `fs_read_file` refused it ("outside allowed roots"), but the agent then "adapted the reference
+  script with sed" through `shell_bash`, which is unconfined on this kernel (CLIO reports
+  `sandbox: mechanism=none, reason=kernel_too_old`). Its prompt and workspace never mention that path,
+  so the agent either searched the home directory or recalled it from CLIO's persistent memory; the
+  logs don't show which. That run is excluded
+  (`invalid/agent_beam-1.0-fp8_try3_found-ground-truth-script`; it scored 5: right F/S, SNR 7.9).
+  No other scored run references `src/qick`, `ss_fidelity` or the repo. A stricter
+  rerun should use a separate user account or container without the answer on disk.
 * Each configuration ran once (plus retries on hard failure), so the per-model ranking reflects a
   single task and is noisy. The wall times overlap because runs shared Tara concurrently.
 * The paper PDF is not committed; regenerate the text with `pdftotext -layout`.
