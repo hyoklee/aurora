@@ -1,0 +1,11 @@
+Qubit readout fidelity recomputation from ss_ge.h5
+Method: fermilab-pub-26-0193 Sec. III.C (clean-side Gaussian cores + max contrast)
+
+Q1: stored=0.8365 F_data=0.9182 +/-0.0035 SNR=7.891 dmu=180.32
+Q2: stored=0.7807 F_data=0.8910 +/-0.0040 SNR=7.034 dmu=124.69
+Q3: stored=0.7425 F_data=0.8718 +/-0.0043 SNR=6.691 dmu=116.10
+Q4: stored=0.0277 F_data=0.5113 +/-0.0065 SNR=0.068 dmu=1.20
+Q5: stored=0.7491 F_data=0.8753 +/-0.0043 SNR=6.405 dmu=116.32
+Q6: stored=0.6517 F_data=0.8288 +/-0.0049 SNR=3.868 dmu=59.46
+
+Paper Fig. 14 value: (91.7 +/- 0.4)%. Matching qubit in file: Q1 (qubit index 0).

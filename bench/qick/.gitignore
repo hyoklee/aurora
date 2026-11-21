@@ -1,0 +1,10 @@
+# per-run copies of the input and the paper text (regenerate with run_*.sh / pdftotext)
+**/ss_ge.h5
+**/fermilab-pub-26-0193.txt
+fermilab-pub-26-0193.txt
+**/__pycache__/
+# bulky caches; discarded runs keep answers/meta/plots but not raw streams
+**/.clio/
+**/*.pkl
+invalid/**/stream.jsonl
+invalid/**/events.jsonl

@@ -1,0 +1,34 @@
+The reproduction is complete. Here is the short report.
+
+## Report: Reproducing the Fig. 14 readout plot and 91.7% fidelity from `ss_ge.h5`
+
+**1. VERDICT: YES**
+
+A second team can reproduce the readout plot and the ≈91.7% fidelity from the saved measurements alone — no rerun of the quantum hardware is needed. `readout.png` (1219×642) reproduces Fig. 14: panel (a) the rotated I-Q scatter with |g⟩ (blue) / |e⟩ (red) clusters and black median markers, panel (b) the projected histogram along I after rotation with dashed Gaussian core fits on the clean (outer) sides and the discrimination threshold marked.
+
+**2. Qubit and computed fidelity**
+
+The 91.7% corresponds to file group **Q1**, which `Syst Config` identifies as **physical qubit index 0** of the six-transmon device (f₀₁ = 4194.7 MHz, readout resonator ≈ 6226.9 MHz). The paper does not name which qubit Fig. 14 shows, so this identification rests on the fidelity match.
+
+Computed from the raw I/Q shots (3000 per state, rotated by the stored Angle −0.1292 rad, projected, max cumulative histogram contrast):
+
+- F = 0.9182 = **91.8%**, binomial δF = √[F(1−F)/6000] = 0.0035 → **91.8 ± 0.4%**
+- Paper: (91.7 ± 0.4)% — 91.7% falls inside my 1-sigma interval. ✓
+- Clean-side cores: n = 1500 per state (matches the paper's "clean ≈ 1500"); file units: Δµ ≈ 180, σ̄ ≈ 38, SNR ≈ 4.76.
+
+The other five qubits compute to 82.9–89.1%, so Q1 is uniquely the high-fidelity qubit.
+
+**3. How my number relates to the value stored in the file**
+
+The file stores `Fidelity = 0.836473` for Q1. That field is **not the fidelity** — it is the maximum cumulative histogram contrast D = 2F − 1 (this relationship holds for all six groups; the file just doesn't document it). Converting with the paper's definition:
+
+F = (1 + D)/2 = (1 + 0.836473)/2 = 0.9182
+
+which is exactly my recomputed value. So the stored number and my number are the same computation reported in different forms; the paper's 91.7% is the fidelity derived from that stored contrast.
+
+**4. What cannot be reproduced from the file alone**
+
+- The paper's absolute "a.u." values (Δµ = 28, σg = 6.4, σe = 6.5, SNR = 4.4) are in normalized units; the file stores raw ADC counts, so only the unitless fidelity matches — not the caption's a.u. numbers.
+- Hardware context absent from the file: T1 = 58.3 ± 4.1 µs, readout length τro = 5.6 µs, qubit effective temperature ≈ 44 mK, HEMT-only amplification, and the device calibration — none can be re-derived or re-run from the file.
+
+Files in this directory: `readout.png` (the plot), `reproduce_readout.py` (the computation), `readout_report.txt` (this report).

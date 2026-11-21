@@ -1,0 +1,67 @@
+Reproducibility Report: QICK Box Fig.14 readout fidelity from ss_ge.h5
+=====================================================================
+
+1. VERDICT: YES (with minor caveats → PARTIAL for exact Fig.14 labeling/units)
+   The 3000-shots/state I/Q datasets saved in ss_ge.h5 are sufficient to
+   recompute the 91.7% fidelity and recreate Fig.14's scatter+histogram
+   without hardware. The core quantitative claim is reproducible. Strictly,
+   PARTIAL if requiring identical axis units and explicit qubit labeling,
+   which are not documented in the file alone.
+
+2. Which qubit and fidelity computed:
+   - Q1 (Exp Config qubit_freq_ge[0]=4188.77 MHz, res_freq_ge[0]=6227.89 MHz,
+     Syst Config qubit_ch=5 mapping to Q1 in file) matches Fig.14.
+   - Recomputed with paper's method (rotate by stored Angle=-0.129 rad to
+     align separation with I, medians µg=-245.7, µe=-65.4, Δµ=180.3 a.u.,
+     clean-side σg=36.4±0.7, σe=39.4±0.7, σ̄=37.9±0.5, SNR=4.76±0.07):
+       F = (P(g|g)+P(e|e))/2 at optimal threshold thr=-155.4 a.u.
+       F_opt = 91.82% (stored angle) / 91.88% (angle optimized to -0.258 rad)
+       Statistical uncertainty δF = sqrt(F(1-F)/6000) = 0.35% → 91.8±0.4%
+     This agrees with paper's F_SS F = (91.7±0.4)% within 0.1% (0.3σ).
+   - All qubits recomputed for comparison (optimal threshold fidelity):
+     Q1 91.8%, Q2 89.1%, Q3 87.2%, Q4 51.5%, Q5 87.5%, Q6 82.9%.
+     Only Q1 reaches 91.7%; it is the highest-SNR qubit in this cooldown.
+
+3. Relation to value stored in file:
+   - File attribute Q1/Fidelity = 0.836472745... (83.65%) is 8.2% absolute
+     (22σ) lower than both the paper (91.7%) and our recomputation (91.8%).
+   - Similar underestimate for all qubits: Q2 78.1% vs 89.1%, Q3 74.2% vs 87.2%,
+     Q5 74.9% vs 87.5%, Q6 65.2% vs 82.9%. Stored values are not reproduced
+     by any simple threshold (midpoint, mean, raw vs rotated) we tested; they
+     appear to be from a non-optimal or outdated classifier (e.g. fixed
+     threshold from Sys Config [-5.84,1,-5,-3,-1,4] or pre-rotation metric),
+     not the maximum-cumulative-contrast definition described in Sec.III.C.
+   - Stored Angle (-0.129 rad) is near-optimal: using it vs fully optimized
+     angle changes fidelity only 91.82%→91.88% and SNR 4.76→4.68, i.e. within
+     statistical error. The file's rotation is therefore consistent with Fig.14.
+
+4. What cannot be reproduced from file alone:
+   - Qubit identity: Fig.14 caption does not name the qubit; file contains
+     no figure mapping. Identification of Q1 as Fig.14 requires inference by
+     matching recomputed fidelity to 91.7%.
+   - Absolute axis scaling: Paper reports Δµ=28±0.2, σg=6.4±0.1, σe=6.5±0.1
+     (SNR 4.4±0.1). Our raw ADC units give Δµ=180.3, σ̄=37.9 (SNR 4.76).
+     Scaling factor ≈6.4 is undocumented; SNR agrees to 8% but depends on
+     unspecified clean-side Gaussian-fit details (our correction factor
+     1/√(1-2/π) for truncated variance; paper fits histograms). Exact paper
+     numbers cannot be recovered without normalization recipe.
+   - Fidelity-limiting analysis: τ_ro=5.6 µs, T1=58.3±4.1 µs, ε_T1=4.7±0.3%,
+     effective temperature ~44 mK, thermal population, IR-shielding study,
+     and HEMT-only chain description are in the paper only, not in HDF5.
+   - Experimental context: six-transmon tantalum-on-sapphire device at QUIET
+     (10 mK, 100 m underground), resonator frequencies/linewidths, and that
+     Q4 is essentially non-functional (Δµ≈1, F≈51% indicating no separation)
+     are not deducible from I/Q alone.
+   - Plot styling/uncertainty propagation details: Exact Gaussian-fit binning,
+     histogram normalization, and error bars require code not provided, though
+     structure is reproducible (readout.png generated here).
+
+Method: Python /tmp/claude-36126/.../venv/bin/python with h5py, numpy,
+matplotlib; data parsed from stringified arrays Qn/I_g etc. (3000 shots each);
+I' = I cosθ - Q sinθ, threshold maximizes (N_g_correct+N_e_correct)/2N; σ from
+clean outer half (I≤µg for |g⟩, I≥µe for |e⟩) corrected for truncation; uncertainties
+per Eq.(4)-(6) in paper.
+
+Files: ss_ge.h5 (1 batch, 2025-10-19_12-46-02), readout.png (2000×900, 313KB)
+reproduces Fig.14 panels (a) scatter + medians, (b) histogram + Gaussian cores.
+

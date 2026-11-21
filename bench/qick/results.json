@@ -1,0 +1,258 @@
+{
+ "agent_beam-1.0-fp8": {
+  "tag": "agent_beam-1.0-fp8",
+  "model": "beam-1.0-fp8",
+  "rc": 0,
+  "wall_s": 1286,
+  "tool_calls": 29,
+  "tools": [
+   "shell_bash"
+  ],
+  "has_plot": true
+ },
+ "agent_mistral-large-4": {
+  "tag": "agent_mistral-large-4",
+  "model": "mistral-large-4",
+  "rc": 0,
+  "wall_s": 611,
+  "tool_calls": 12,
+  "tools": [
+   "shell_bash"
+  ],
+  "has_plot": true
+ },
+ "agent_muse-spark-bf16": {
+  "tag": "agent_muse-spark-bf16",
+  "model": "muse-spark-bf16",
+  "rc": 0,
+  "wall_s": 12,
+  "tool_calls": 0,
+  "tools": [],
+  "has_plot": false
+ },
+ "agent_nemotron-35-super-vl": {
+  "tag": "agent_nemotron-35-super-vl",
+  "model": "nemotron-35-super-vl",
+  "rc": 0,
+  "wall_s": 57,
+  "tool_calls": 15,
+  "tools": [
+   "shell_bash"
+  ],
+  "has_plot": true
+ },
+ "coder_beam-1.0-fp8": {
+  "tag": "coder_beam-1.0-fp8",
+  "model": "beam-1.0-fp8",
+  "target": "alcf-tara",
+  "rc": 0,
+  "wall_s": 357,
+  "usage": {
+   "input": 147229,
+   "output": 17428,
+   "cacheRead": 458608,
+   "cacheWrite": 0,
+   "reasoning": 7232,
+   "totalTokens": 623265,
+   "costUsd": 0,
+   "apiCalls": 28,
+   "measured": true
+  },
+  "has_plot": true
+ },
+ "coder_mistral-large-4": {
+  "tag": "coder_mistral-large-4",
+  "model": "mistral-large-4",
+  "target": "alcf-tara",
+  "rc": 0,
+  "wall_s": 1286,
+  "usage": {
+   "input": 1784172,
+   "output": 62667,
+   "cacheRead": 0,
+   "cacheWrite": 0,
+   "reasoning": 43551,
+   "totalTokens": 1846839,
+   "costUsd": 0,
+   "apiCalls": 36,
+   "measured": true
+  },
+  "has_plot": true
+ },
+ "coder_muse-spark-bf16": {
+  "tag": "coder_muse-spark-bf16",
+  "model": "muse-spark-bf16",
+  "target": "alcf-tara",
+  "rc": 0,
+  "wall_s": 432,
+  "usage": {
+   "input": 1386097,
+   "output": 25691,
+   "cacheRead": 0,
+   "cacheWrite": 0,
+   "reasoning": 7781,
+   "totalTokens": 1411788,
+   "costUsd": 0,
+   "apiCalls": 32,
+   "measured": true
+  },
+  "has_plot": true
+ },
+ "coder_nemotron-35-super-vl": {
+  "tag": "coder_nemotron-35-super-vl",
+  "model": "nemotron-35-super-vl",
+  "target": "alcf-tara",
+  "rc": 0,
+  "wall_s": 137,
+  "usage": {
+   "input": 1236735,
+   "output": 34281,
+   "cacheRead": 0,
+   "cacheWrite": 0,
+   "reasoning": 24684,
+   "totalTokens": 1271016,
+   "costUsd": 0,
+   "apiCalls": 26,
+   "measured": true
+  },
+  "has_plot": true
+ },
+ "genesis_beam-1.0-fp8": {
+  "tag": "genesis_beam-1.0-fp8",
+  "model": "beam-1.0-fp8",
+  "rc": 0,
+  "wall_s": 284,
+  "usage": {
+   "input_tokens": 306,
+   "cache_creation_input_tokens": 603488,
+   "cache_read_input_tokens": 467552,
+   "output_tokens": 11937,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 0,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "",
+   "iterations": [],
+   "speed": "standard",
+   "fallback_credit": null
+  },
+  "num_turns": 36,
+  "is_error": false,
+  "terminal_reason": "completed",
+  "tool_calls": 35,
+  "skills_invoked": [],
+  "has_plot": true
+ },
+ "genesis_mistral-large-4": {
+  "tag": "genesis_mistral-large-4",
+  "model": "mistral-large-4",
+  "rc": 1,
+  "wall_s": 911,
+  "usage": {
+   "input_tokens": 2057387,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "output_tokens": 52249,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 0,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "",
+   "iterations": [],
+   "speed": "standard",
+   "fallback_credit": null
+  },
+  "num_turns": 38,
+  "is_error": true,
+  "terminal_reason": "api_error",
+  "tool_calls": 37,
+  "skills_invoked": [],
+  "has_plot": true
+ },
+ "genesis_muse-spark-bf16": {
+  "tag": "genesis_muse-spark-bf16",
+  "model": "muse-spark-bf16",
+  "rc": 0,
+  "wall_s": 480,
+  "usage": {
+   "input_tokens": 2152010,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "output_tokens": 27196,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 0,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "",
+   "iterations": [],
+   "speed": "standard",
+   "fallback_credit": null
+  },
+  "num_turns": 37,
+  "is_error": false,
+  "terminal_reason": "completed",
+  "tool_calls": 36,
+  "skills_invoked": [],
+  "has_plot": true
+ },
+ "genesis_nemotron-35-super-vl": {
+  "tag": "genesis_nemotron-35-super-vl",
+  "model": "nemotron-35-super-vl",
+  "rc": 0,
+  "wall_s": 120,
+  "usage": {
+   "input_tokens": 1191849,
+   "cache_creation_input_tokens": 0,
+   "cache_read_input_tokens": 0,
+   "output_tokens": 31674,
+   "output_tokens_details": {
+    "thinking_tokens": 0
+   },
+   "server_tool_use": {
+    "web_search_requests": 0,
+    "web_fetch_requests": 0
+   },
+   "service_tier": "standard",
+   "cache_creation": {
+    "ephemeral_1h_input_tokens": 0,
+    "ephemeral_5m_input_tokens": 0
+   },
+   "inference_geo": "",
+   "iterations": [],
+   "speed": "standard",
+   "fallback_credit": null
+  },
+  "num_turns": 30,
+  "is_error": false,
+  "terminal_reason": "completed",
+  "tool_calls": 28,
+  "skills_invoked": [
+   "dataviz"
+  ],
+  "has_plot": true
+ }
+}
