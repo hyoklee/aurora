@@ -1,0 +1,21 @@
+The MultiSenseGolf dataset (Scientific Data 2026; the paper text is paper.txt in this
+directory; Harvard Dataverse doi:10.7910/DVN/LCCLLW) has already been ingested into a
+running clio-core runtime by the OMNI file golf_omni.yaml in this directory (the CAE
+dataverse:// source). Do NOT download the dataset: read it from clio-core.
+
+How to read it: in a shell, run `source ./clio_env.sh` and use the Python at
+/tmp/claude-36126/-home-hyoklee-aurora/7e1b65af-7054-4a75-8def-00dce7042087/scratchpad/venv/bin/python (numpy, pandas, scipy, scikit-learn, h5py are installed).
+`import cte_golf as cg` (cte_golf.py is in this directory; read its docstring):
+cg.manifest() lists every ingested object and its tag, cg.read_array(tag) returns a
+dataset as a numpy array, cg.read_csv(tag) returns a CSV (Documentation.zip/*.csv hold
+participant metadata and per-swing annotations).
+
+Question: which sensor values make the biggest separation between novice golfers
+(the Beginner group) and pro golfers (the Professional group)? Sort the sensor
+variables by their impact.
+
+Deliverables, in this directory:
+1. analyze_golf.py - the analysis, reading all data from clio-core.
+2. answer.md - the ranked list of sensor variables with the separation measure you
+   used, how the per-swing features were computed, and caveats.
+3. In answer.md, also report how long reading the data from clio-core took.

@@ -1,0 +1,20 @@
+# OMNI: ingest MultiSenseGolf (Harvard Dataverse doi:10.7910/DVN/LCCLLW) into
+# clio-core straight from Dataverse -- no manual download. Run with
+#   clio-cae golf_omni.yaml          (clio-core built with CAE Dataverse + HDF5)
+#
+# Only the per-swing sensor HDF5 files and the Documentation CSVs are taken
+# out of the 34 participant zips (~1.3 GB of 49 GB; the rest is video).
+# Each HDF5 file's numeric datasets become tags
+#   golf/<zip>/<SwingNN>/<file>.hdf5/<stream>/<data|time_s>
+# and the CSVs become binary tags golf/Documentation.zip/<name>.csv.
+# The tag "golf" holds a "manifest" blob listing every ingested object.
+transfers:
+  - src: "dataverse://dataverse.harvard.edu/doi:10.7910/DVN/LCCLLW"
+    dst: "iowarp::golf"
+    format: "hdf5"
+    dataset_filter:
+      include_patterns:
+        - "Documentation.zip/*.csv"
+        - "P*.zip/*_stream_data.hdf5"
+        - "hdf5:*/data"            # datasets inside each HDF5 file
+        - "hdf5:*/time_s"

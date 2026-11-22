@@ -1,0 +1,9 @@
+{
+ "source": "clio-core (CTE)",
+ "swings": 1557,
+ "datasets": 17127,
+ "bytes_read": 784532760,
+ "list_s": 0.003,
+ "read_s": 2.948,
+ "features_s": 2.257
+}

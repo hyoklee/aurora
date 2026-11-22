@@ -1,0 +1,9 @@
+{
+ "source": "HDF5 files (h5py)",
+ "swings": 1557,
+ "datasets": 17127,
+ "bytes_read": 784532760,
+ "list_s": 0.035,
+ "read_s": 7.342,
+ "features_s": 2.268
+}

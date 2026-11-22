@@ -1,0 +1,52 @@
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/manager.cc:181 INFO 3971447 ClientInit RuntimeManager::ClientInit[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/config_manager.cc:144 INFO 3971447 ClientInit Config at: /home/hyoklee/aurora/bench/golf/clio_golf.yaml[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:314 INFO 3971447 ClientInit IpcManager::ClientInit: IPC mode = SHM (auto-selected)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:334 INFO 3971447 ClientInit IpcManager::ClientInit: retry_timeout = 60s[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:342 INFO 3971447 ClientInit IpcManager::ClientInit: try_new_servers = 0[0m
+[97m/home/hyoklee/clio-core.dataverse/context-transport-primitives/lightbeam/include/clio_ctp/lightbeam/zmq_transport.h:154 INFO 3971447 GetSharedContext [ZeroMqTransport] Created shared context with 8 I/O threads[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:395 INFO 3971447 ClientInit IpcManager: DEALER transport connected to port 9516[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:425 INFO 3971447 ClientInit IpcManager: client response listener bound to port 35545[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:1633 INFO 3971447 WaitForLocalServer Waiting for runtime via lightbeam (timeout=30s)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:1743 INFO 3971447 WaitForLocalServer Successfully connected to runtime (generation=780666120876933, server_pid=3938457, shm_in_shards=1)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:1439 INFO 3971447 ClientInitShm ClientInitShm: attached metadata segment 'chi_metadata_segment_hyoklee_9513'[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:1464 INFO 3971447 ClientInitShm ClientInitShm: response SHM ring 'clio-3971447-shm-out' (1MB)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:3428 INFO 3971447 IncreaseClientShm IpcManager::IncreaseClientShm: Creating clio_3971447_0 with size 570425344 (536870912 + 33554432 overhead)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:3472 INFO 3971447 IncreaseClientShm IpcManager::IncreaseClientShm: Created allocator clio_3971447_0 with ID (3971447.0)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/manager.cc:230 INFO 3971447 ClientInit ClientInit: Creating admin client with kAdminPoolId=PoolId(major:1, minor:0)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/manager.cc:236 INFO 3971447 ClientInit ClientInit: Admin client created, pool_id_=PoolId(major:1, minor:0)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:76 INFO 3971447 LoadOmni Loading OMNI file: /home/hyoklee/aurora/bench/golf/golf_omni.yaml[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:199 INFO 3971447 LoadOmni   Loaded transfer 1/1: [0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:200 INFO 3971447 LoadOmni     src: dataverse://dataverse.harvard.edu/doi:10.7910/DVN/LCCLLW[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:201 INFO 3971447 LoadOmni     dst: iowarp::golf[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:202 INFO 3971447 LoadOmni     format: hdf5[0m
+    dataset_filter.include_patterns: ["Documentation.zip/*.csv", "P*.zip/*_stream_data.hdf5", "hdf5:*/data", "hdf5:*/time_s"]
+[32m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:232 SUCCESS 3971447 LoadOmni Successfully loaded 1 transfer(s) from OMNI file[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/util/clio_cae.cc:134 INFO 3971447 main Calling ParseOmni...[0m
+[32m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/util/clio_cae.cc:184 SUCCESS 3971447 main ParseOmni completed successfully![0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/util/clio_cae.cc:185 INFO 3971447 main   Tasks scheduled: 1[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/util/clio_cae.cc:188 INFO 3971447 main   NOTE: assimilation is ASYNCHRONOUS -- tasks are scheduled, not complete. Poll `cte_search '<dst>.*'` to confirm blobs have landed.[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:4729 INFO 3971483 RecvZmqClientThread [CountClientRecv] TOTAL responses=2 misses=0 identity_mismatches=0[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:3145 INFO 3971447 ClearClientPool [ClientPool] Cleared 0 persistent connections and 0 dial-backs[0m
+	Command being timed: "clio-cae /home/hyoklee/aurora/bench/golf/golf_omni.yaml"
+	User time (seconds): 0.73
+	System time (seconds): 1.23
+	Percent of CPU this job got: 5%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:36.15
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 18040
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 0
+	Minor (reclaiming a frame) page faults: 2741
+	Voluntary context switches: 270323
+	Involuntary context switches: 8
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

@@ -1,0 +1,30 @@
+# Private clio-core runtime for the golf benchmark (port 9513, apart from the
+# CLIO agent's own runtime on 9413). RAM tier only: the data is ~1.3 GB.
+networking:
+  port: 9513
+runtime:
+  num_threads: 16
+  queue_depth: 4096
+compose:
+  - mod_name: clio_bdev
+    pool_name: "ram::golf_default_bdev"
+    pool_query: local
+    pool_id: "301.0"
+    bdev_type: ram
+    capacity: "8g"
+  - mod_name: clio_cae_core
+    pool_name: cae_main
+    pool_query: local
+    pool_id: "400.0"
+    next_pool_id: "512.0"
+  - mod_name: clio_cte_core
+    pool_name: cte_main
+    pool_query: local
+    pool_id: "512.0"
+    storage:
+      - path: "ram::golf_cte_ram"
+        bdev_type: "ram"
+        capacity_limit: "16g"
+        score: 1.0
+    dpe:
+      dpe_type: "max_bw"
