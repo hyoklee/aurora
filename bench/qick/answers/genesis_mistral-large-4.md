@@ -1,0 +1,1 @@
+API Error: 400 Upstream endpoint returned 400: b'{"type":"error","error":{"type":"invalid_request_error","message":"At most 2 image(s) may be provided in one prompt. (parameter=image)"}}'.

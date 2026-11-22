@@ -1,0 +1,7 @@
+VERDICT: YES (with the caveat that the qubit must be inferred from the data).
+
+1. Qubit and fidelity: The 91.7% corresponds to Q1 (qubit index 0, qubit frequency ~4.195 GHz) in `ss_ge.h5`. Recomputing the single-shot readout fidelity as the maximum cumulative histogram contrast on the rotated I-quadrature gives **91.82%** (6000 shots; binomial uncertainty ≈0.35%, matching the paper's (91.7 ± 0.4)%). Plot saved as `readout.png`.
+
+2. Relation to the stored value: The file stores `Fidelity = 0.8365` (83.65%) for Q1. My recomputed value is ~8.2 percentage points higher. The stored number does not match any simple threshold I tested (midpoint threshold already gives ~91.6%), so it appears to be from a different/non-optimized assignment rule or an earlier analysis pass; the paper's 91.7% is the optimized max-contrast value.
+
+3. Not reproducible from the file alone: the T1 decay model (T1 = 58.3 ± 4.1 µs), thermal-population estimate, and the resulting fidelity-limiting analysis are not contained in `ss_ge.h5` (no T1/temperature measurements), so those aspects of Fig. 14's interpretation cannot be reproduced from the saved shots alone. The I/Q shots, rotation angle, and shot counts needed for the scatter plot, projected histogram, Gaussian-core overlays, fidelity, and its statistical uncertainty are all present.

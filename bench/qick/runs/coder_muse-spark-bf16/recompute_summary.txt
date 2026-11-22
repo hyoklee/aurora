@@ -1,0 +1,3 @@
+Q1 F_ks=0.83633 F_avg=0.91817 stored=0.83647
+delta=180.32 sigma_g=37.33 sigma_e=40.64 SNR=4.62
+dF=0.0035 dSNR=0.07

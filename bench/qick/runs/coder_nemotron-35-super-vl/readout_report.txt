@@ -1,0 +1,49 @@
+REPRODUCIBILITY CHECK: QICK Box single-shot readout plot (Fig. 14) and 91.7% fidelity
+from saved measurements in ss_ge.h5 (no hardware rerun).
+
+Method (paper, FERMILAB-PUB-26-0193, Sec. III C): rotate each (I, Q) shot by the
+stored Angle so the separation axis aligns with I, project onto I, and take the
+readout fidelity as the maximum cumulative histogram contrast,
+    F = (1 + max_t [F_g(t) - F_e(t)]) / 2     (equal priors, |g> lower, |e> upper),
+with 3000 shots per state. Clean-side Gaussian cores from the outer half of each
+distribution (paper: clean ~ 1500 per state).
+
+1. VERDICT: YES
+   The readout plot and the ~91.7% fidelity are fully reproducible from
+   ss_ge.h5 alone; no rerun of the quantum hardware is needed. readout.png
+   reproduces Fig. 14 (rotated I-Q scatter + projected histogram with Gaussian
+   core fits).
+
+2. Qubit and computed fidelity
+   The 91.7% corresponds to file group Q1, i.e. physical qubit index 0 of the
+   six-transmon device (Syst Config: list_of_all_qubits [0]; f01 = 4194.7 MHz,
+   readout resonator ~ 6226.9 MHz). The paper itself does not name which qubit
+   Fig. 14 shows, so this identification rests on the fidelity match.
+   Computed from the raw shots: F = 0.9182 = 91.8%, binomial uncertainty
+   delta F = sqrt(F(1-F)/6000) = 0.0035 -> 91.8 +/- 0.4% (1 sigma).
+   This agrees with the paper's (91.7 +/- 0.4)% (91.7% lies inside my
+   1-sigma interval). The other five qubits give 82.9-89.1%, so Q1 is the
+   high-fidelity qubit.
+
+3. Relation to the value stored in the file
+   The file stores "Fidelity" = 0.836473 for Q1. That field is NOT the
+   fidelity: it is the maximum cumulative histogram contrast D = 2F - 1 (this
+   holds for all six groups, e.g. Q2 stored 0.7807 -> F = 0.891). The file does
+   not document this; the paper's definition is required. Converting:
+   F = (1 + 0.836473)/2 = 0.9182, exactly my recomputed value. So the stored
+   number and my number are the same computation reported in different forms;
+   the paper's 91.7% is the fidelity derived from that stored contrast.
+
+4. What cannot be reproduced from the file alone
+   - The paper's absolute "a.u." numbers: Delta mu = 28, sigma_g = 6.4,
+     sigma_e = 6.5, SNR = 4.4 are in normalized units; ss_ge.h5 stores raw ADC
+     units (Delta mu ~ 180, sigma ~ 36-39, SNR ~ 4.76 here). Only the
+     unitless fidelity matches byte-for-byte.
+   - Hardware/context: T1 = 58.3 +/- 4.1 us, readout length tau_ro = 5.6 us,
+     qubit effective temperature ~ 44 mK, HEMT-only amplification, the
+     six-qubit tantalum-on-sapphire device and its calibration are not in the
+     file.
+   - Nothing about the quantum hardware can be re-run or re-calibrated from
+     the file; the file is a static record of 3000 shots per state per qubit.
+
+Files produced: readout.png (the plot), reproduce_readout.py (the computation).

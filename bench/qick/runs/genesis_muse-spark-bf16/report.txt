@@ -1,0 +1,74 @@
+Reproducibility report for ss_ge.h5 (FERMILAB-PUB-26-0193 Fig.14, 91.7% fidelity)
+
+1. VERDICT: YES
+   A second team can recompute the published readout fidelity and recreate
+   the equivalent of Fig.14 from the saved I/Q shots alone, without hardware.
+   The morphology (two well-separated clusters, rotated to I, projected histogram
+   with clean-side Gaussian cores, optimal threshold) is fully reproducible and
+   the fidelity agrees within the paper's quoted ±0.4%.
+
+2. WHICH QUBIT AND FIDELITY COMPUTED
+   - The 91.7% corresponds to the best-performing qubit in the file: Q1
+     (HDF5 group "Q1", Syst Config list_of_all_qubits [0], i.e. physical qubit
+     index 0, res_freq_ge ≈ 6226.88 MHz, res_gain_ge 0.92, Batch 0 Round 0).
+   - Recomputed from raw 3000+3000 I_g/Q_g/I_e/Q_e shots by the paper's own
+     definition — maximum cumulative histogram contrast after rotation to align
+     maximum state separation with I:
+        * using stored Angle = -0.129 rad:  F = 0.9182  (91.8%) at T = -155 a.u.
+        * using numerically optimal angle -0.197 rad: F = 0.9185 (91.85%)
+     Both lie inside 91.7 ±0.4%. Binomial error sqrt(F(1-F)/6000)=0.35%, consistent
+     with paper's ±0.4%.
+   - Next best qubits for reference: Q2 89.1%, Q3 87.1%, Q5 87.5%, Q6 82.9%,
+     Q4 51.5% (non-functional). Only Q1 reaches the published value.
+   - SNR check (clean-side method, outer half I≤μ_g / I≥μ_e):
+        Δμ = 180.3 a.u., σ_g = 37.3, σ_e = 40.6, σ̄ = 39.0 → SNR = 4.62
+     Paper reports Δμ=28, σ_g=6.4, σ_e=6.5, SNR=4.4±0.1. Absolute scale differs
+     by ~6.4× (ADC counts vs paper's normalized a.u.), but the ratio SNR=Δμ/σ̄
+     matches within 2σ (4.62 vs 4.4). Using the paper's mean-absolute-deviation
+     or corrected-truncated estimators gives 4.55–4.76, same conclusion.
+
+3. RELATION TO VALUE STORED IN FILE
+   - Each qubit group stores a pre-computed scalar "Fidelity":
+        Q1 0.8365, Q2 0.7807, Q3 0.7425, Q4 0.0277, Q5 0.7491, Q6 0.6517
+     These DO NOT reproduce the paper's number. For Q1 the stored 83.6% is
+     8.2 percentage points (≈23 σ) below both the paper (91.7%) and our
+     recomputation (91.8%). The offset is systematic across qubits
+     (Q2 -11.0pt, Q3 -12.9pt, Q5 -12.6pt, Q6 -17.7pt). The stored value cannot be
+     obtained from the standard max-contrast definition at the stored angle
+     (which gives 91.8% at midpoint threshold -155.6); it corresponds to a
+     threshold ~62 a.u. higher (-93.7) or to a different (undocumented) estimator.
+   - In short: the file contains enough raw data to recompute the published
+     fidelity, but the published fidelity is NOT the value in the Fidelity dataset
+     — it must be recomputed as we did. The Angle dataset is consistent with the
+     optimal rotation (within 0.07 rad) and can be reused or re-optimized.
+
+4. WHAT CANNOT BE REPRODUCED FROM FILE ALONE
+   - Absolute axis scaling: paper's Δμ=28, σ≈6.4 a.u. vs raw ADC Δμ≈180,
+     σ≈37–41. Gain/attenuation normalization is not stored; only SNR and fidelity
+     (scale-invariant) are reproducible.
+   - Exact Gaussian-core fit numbers and error bars without the paper's binning/
+     fitting code; clean-side σ depends on estimator (RMS vs √π/2·mean|dev| vs
+     truncated-std correction) at the few-percent level.
+   - Experimental context: readout pulse τ_ro=5.6 µs, T1=58.3±4.1 µs and the
+     T1-limited error ε_T1=4.7% (Eq.7), qubit effective temperature 44 mK,
+     HEMT-only amplification chain, resonator frequencies/linewidths,
+     infrared-shielding history, and the statement "limited by T1 decay" all
+     require the paper text / external logs (Exp Config and Syst Config give
+     frequencies/gains but not T1, temperature, or pulse duration).
+   - Figure labeling: the file labels qubits Q1–Q6 (0–5); the paper's Fig.14
+     does not state which physical qubit index is shown — we infer Q1 by
+     matching fidelity/SNR, but that mapping is not in the file.
+   - Provenance beyond Batch 1: the filename indicates batch 1 Num_per_batch 1
+     with 3000 shots/state, matching the paper's "3000 measurements per state",
+     but whether additional batches were averaged for the paper is not in the file.
+   - Visual style: exact colors, fonts, median marker style, and histogram
+     binning of Fig.14 require the plotting script (we provide an equivalent
+     readout.png).
+
+Files produced: readout.png (scatter + projected histogram for Q1, Gaussian cores,
+threshold, fidelity/SNR annotated), this report.txt, recompute.py / explore_fid2.py
+and make_plot.py document the recomputation.
+
+Method summary: I' = I cosθ − Q sinθ (θ = stored Angle), medians μ_g,μ_e,
+threshold T maximizing (CDF_g(T)+1−CDF_e(T))/2, fidelity F = max_T…, SNR =
+|μ_e−μ_g| / sqrt((σ_g²+σ_e²)/2) with σ from √⟨(I−μ)²⟩ on the clean outer half.

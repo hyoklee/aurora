@@ -1,0 +1,30 @@
+Everything checks out. The plot rendered cleanly (1800×750 PNG) and all numbers are computed. Here is the final report.
+
+---
+
+# Report: reproducing the QICK Box Fig. 14 readout plot / 91.7 % fidelity from `ss_ge.h5`
+
+**1. VERDICT: YES** — the Fig. 14 plot and the 91.7 % readout fidelity are fully reproducible offline from the saved raw I/Q shots in `ss_ge.h5`, no hardware rerun needed. (Secondary details are only partially reproducible; see item 4.)
+
+**2. Qubit and computed fidelity.** The file holds six groups `Q1`–`Q6`, each with `I_g, Q_g, I_e, Q_e` (3000 shots per state, stored as text-encoded arrays), a rotation `Angle`, a stored `Fidelity`, and `Exp/Syst Config`. The `Syst Config` in each group (`list_of_all_qubits: [0]` in `Q1`, `[1]` in `Q2`, …) maps **Q1 = qubit index 0** (readout resonator 6226.88 MHz, qubit ≈ 4189.8 MHz). Applying the paper's method (Sec. III C: rotate by the stored angle, `I' = I·cosθ − Q·sinθ`, project on I′, take the **maximum cumulative-histogram contrast** over the threshold, δF = √(F(1−F)/N_total)):
+
+| group | qubit idx | recomputed F | stored `Fidelity` |
+|---|---|---|---|
+| **Q1** | **0** | **0.9182 ± 0.0035 = (91.82 ± 0.35) %** (0.9170 at 50 bins) | 0.836473 |
+| Q2 | 1 | 89.07 % | 0.780667 |
+| Q3 | 2 | 87.15 % | 0.742457 |
+| Q4 | 3 | 51.42 % | 0.027667 |
+| Q5 | 4 | 87.50 % | 0.749125 |
+| Q6 | 5 | 82.83 % | 0.651667 |
+
+Only **Q1 (qubit 0)** matches the paper's **FSSF = (91.7 ± 0.4) %**; the binomial error bar we compute (±0.35 %) also matches the paper's ±0.4 %. Optimal threshold I′ ≈ −155.3 (raw units); per-state assignment F_g = 0.940, F_e = 0.896 — the deficit is on the |e⟩ side, consistent with the paper's T1-decay-during-readout argument.
+
+**3. Relation to the value stored in the file.** The stored `Fidelity` dataset is **not** the paper's max-contrast fidelity. For Q1 it reads 0.8365 vs our 0.9182. I tested whether it is any fixed- or optimal-threshold classification of the saved shots (raw I, both rotation signs, config `threshold` values from `Syst Config`, nearest-centroid in 2D): no threshold on any projection reproduces it, and for Q1/Q3/Q5 the stored values are not even of the form k/6000, i.e. not any count-based threshold fidelity of these 6000 shots. Q4's stored 0.0277 (vs 51.4 % max-contrast; its two clusters are concentric, Mahalanobis distance 0.06) shows the acquisition code's stored number uses its own — apparently stale/inverted for Q4 — threshold convention. So: the 91.7 % must be (and is) recomputed from the raw `I/Q` arrays; the stored `Fidelity` field is a different, lower, acquisition-side quantity whose exact formula is not recoverable from the file.
+
+**4. What cannot be reproduced from the file alone.**
+- The exact Fig. 14 auxiliary numbers in "a.u.": we get ∆µ = 180.3 ± 0.4 raw, clean-side (outer-half) RMS σ_g = 21.9, σ_e = 23.7 → clean-side SNR 7.9; a Gaussian core fit to the full histograms gives σ ≈ 35.5/39.7 → SNR ≈ 4.8, close to the paper's SNR = 4.4 ± 0.1 with ∆µ = 28, σ̄ = 6.5 a.u. The a.u. normalization and exact binning/fit recipe are not stored, so 28/6.4/6.5/4.4 are only approximately matched.
+- The formula behind the stored per-qubit `Fidelity` values (no code in the file).
+- The physical attribution (T1 = 58.3 µs, τ_ro = 5.6 µs, ε_T1 = 4.7 %, 44 mK effective temperature) — no T1/temperature data in this file.
+- The paper never names the qubit; Q1/qubit 0 is inferred from the unique fidelity match. Only batch 1 is in the file, so we cannot check whether the paper's figure used a later batch.
+
+**Artifacts written in the current directory:** `readout.png` (two-panel Fig. 14-style plot: rotated I–Q scatter with median markers, and the projected I′ histogram with Gaussian-core overlays and the optimal threshold, annotated with F = 91.82 ± 0.35 %) and `reproduce_readout.py` (the full reproducible analysis, run with the venv python).
