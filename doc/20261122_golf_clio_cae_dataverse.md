@@ -10,8 +10,9 @@ from Dataverse so the CLIO agent can analyze the data from an OMNI YAML.
 
 The installed clio-core wheel (iowarp-core 2.2.1) could not do this: its CAE had no
 Dataverse or zip support and was built without HDF5. A new CAE source was added on
-branch `feat/cae-dataverse-assimilator` of iowarp/clio-core (commit `47c2a473f`,
-**local only, not pushed**; worktree `~/clio-core.dataverse`):
+branch `feat/cae-dataverse-assimilator` of iowarp/clio-core, now
+**PR [iowarp/clio-core#1429](https://github.com/iowarp/clio-core/pull/1429)**
+against `dev` (worktree `~/clio-core.dataverse`):
 
 ```yaml
 # bench/golf/golf_omni.yaml
@@ -145,10 +146,30 @@ How try 3's ranking compares with the ground truth:
     where the golfer stood rather than skill.
 * **No write-up:** it never produced a written answer.
 
+### Other ALCF models (2026-11-23)
+
+The runtime was restarted on the rebased build (PR iowarp/clio-core#1429). The
+golf runtime had again died silently, at 16:03. The data was re-ingested from
+the OMNI file in 35 s, giving the same 40,486 tags, and every run passed the
+pre-flight check.
+
+| model | try | result |
+|---|---|---|
+| mistral-large-4 | 1 | **failed after 2 min**: ALCF gateway `HTTP 502 Bad Gateway` after 2 tool calls (infrastructure, not the model) |
+| mistral-large-4 | 2 | **failed after 17 min**: 9 tool calls. It read the paper and both metadata CSVs **from clio-core**, then at step 7 replied `[["next_thought"]]`, which CLIO's DSPy JSONAdapter cannot parse (`model_reply_unparseable`). No deliverable. |
+| nemotron-35-super-vl | 1 | **no deliverable in 2.3 min**: 44 tool calls. It read the CSVs from clio-core and wrote five `explore_*.py` scripts. Its later `shell_bash` calls repeatedly failed CLIO's argument validation, so it could not run them, and it ended with a plan instead of `analyze_golf.py` and `answer.md`. |
+
+Runs: `runs/fail_agent_mistral_try1_alcf502`, `runs/fail_agent_mistral_try2_adapter_parse`,
+`runs/agent_nemotron-35-super-vl`.
+
 Verdict: the data path works end to end. The OMNI file feeds CAE from Dataverse,
-CTE holds the data, and the agent reads it from CTE. The analysis quality is
-limited by the model: beam never finished a deliverable in 3 tries, and its
-ranking mixes real effects with two artifacts.
+CTE holds the data, and every model that got past its first steps read it from
+CTE. None of the three ALCF models finished the analysis:
+* beam got furthest (3 tries; a 4,128-row ranking mixing real effects with two
+  artifacts, but no written answer).
+* mistral and nemotron failed on CLIO's tool-call formatting (a reply the JSON
+  adapter can't parse; `shell_bash` arguments that fail validation), as on the
+  QICK question.
 
 ## Files
 
