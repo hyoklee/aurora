@@ -1,0 +1,20 @@
+158,159c158,159
+< plt.rc('text', usetex=True)
+< plt.rc('text.latex', preamble=r'\usepackage{amsmath}')
+---
+> plt.rc('text', usetex=False)
+> 
+171c171
+< legend_labels = [r"$\mathcal{M}(d; \boldsymbol{\phi}) > " + lbl + r"$" 
+---
+> legend_labels = [r"$\mathcal{M}(d; \phi) > " + lbl + r"$" 
+203c203
+< plt.xlabel(r"$L_{\text{eff}}$ (erg yr${}^{-1}$)")
+---
+> plt.xlabel(r"$L_{\mathrm{eff}}$ (erg yr${}^{-1}$)")
+205c205
+< plt.savefig("standard_candle.pdf")
+---
+> plt.savefig("standard_candle_ref.png")
+207a208
+> np.save("ln_M_ref.npy", ln_M_meshpoints)

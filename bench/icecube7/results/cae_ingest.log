@@ -1,0 +1,29 @@
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/manager.cc:181 INFO 2084473 ClientInit RuntimeManager::ClientInit[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/config_manager.cc:144 INFO 2084473 ClientInit Config at: /home/hyoklee/aurora/bench/icecube7/clio_ice.yaml[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:314 INFO 2084473 ClientInit IpcManager::ClientInit: IPC mode = SHM (auto-selected)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:334 INFO 2084473 ClientInit IpcManager::ClientInit: retry_timeout = 60s[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:342 INFO 2084473 ClientInit IpcManager::ClientInit: try_new_servers = 0[0m
+[97m/home/hyoklee/clio-core.dataverse/context-transport-primitives/lightbeam/include/clio_ctp/lightbeam/zmq_transport.h:154 INFO 2084473 GetSharedContext [ZeroMqTransport] Created shared context with 8 I/O threads[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:395 INFO 2084473 ClientInit IpcManager: DEALER transport connected to port 9616[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:425 INFO 2084473 ClientInit IpcManager: client response listener bound to port 41593[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:1633 INFO 2084473 WaitForLocalServer Waiting for runtime via lightbeam (timeout=30s)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:1743 INFO 2084473 WaitForLocalServer Successfully connected to runtime (generation=893445877958118, server_pid=2081879, shm_in_shards=1)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:1439 INFO 2084473 ClientInitShm ClientInitShm: attached metadata segment 'chi_metadata_segment_hyoklee_9613'[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:1464 INFO 2084473 ClientInitShm ClientInitShm: response SHM ring 'clio-2084473-shm-out' (1MB)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:3428 INFO 2084473 IncreaseClientShm IpcManager::IncreaseClientShm: Creating clio_2084473_0 with size 570425344 (536870912 + 33554432 overhead)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:3472 INFO 2084473 IncreaseClientShm IpcManager::IncreaseClientShm: Created allocator clio_2084473_0 with ID (2084473.0)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/manager.cc:230 INFO 2084473 ClientInit ClientInit: Creating admin client with kAdminPoolId=PoolId(major:1, minor:0)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/manager.cc:236 INFO 2084473 ClientInit ClientInit: Admin client created, pool_id_=PoolId(major:1, minor:0)[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:76 INFO 2084473 LoadOmni Loading OMNI file: /home/hyoklee/aurora/bench/icecube7/ice_omni.yaml[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:199 INFO 2084473 LoadOmni   Loaded transfer 1/1: [0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:200 INFO 2084473 LoadOmni     src: https://icecube.wisc.edu/data-releases/20190904_Bayesian_posterior_for_IceCube_7-year_point-source_search_with_neutrino-count_statistics.zip[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:201 INFO 2084473 LoadOmni     dst: iowarp::ice[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:202 INFO 2084473 LoadOmni     format: hdf5[0m
+    dataset_filter.include_patterns: ["*.zip/posterior.h5", "*.zip/example.py", "*.zip/readme.txt"]
+[32m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/src/omni_loader.cc:232 SUCCESS 2084473 LoadOmni Successfully loaded 1 transfer(s) from OMNI file[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/util/clio_cae.cc:134 INFO 2084473 main Calling ParseOmni...[0m
+[32m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/util/clio_cae.cc:184 SUCCESS 2084473 main ParseOmni completed successfully![0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/util/clio_cae.cc:185 INFO 2084473 main   Tasks scheduled: 1[0m
+[97m/home/hyoklee/clio-core.dataverse/context-assimilation-engine/core/util/clio_cae.cc:188 INFO 2084473 main   NOTE: assimilation is ASYNCHRONOUS -- tasks are scheduled, not complete. Poll `cte_search '<dst>.*'` to confirm blobs have landed.[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:4729 INFO 2084504 RecvZmqClientThread [CountClientRecv] TOTAL responses=2 misses=0 identity_mismatches=0[0m
+[97m/home/hyoklee/clio-core.dataverse/context-runtime/src/ipc_manager.cc:3145 INFO 2084473 ClearClientPool [ClientPool] Cleared 0 persistent connections and 0 dial-backs[0m

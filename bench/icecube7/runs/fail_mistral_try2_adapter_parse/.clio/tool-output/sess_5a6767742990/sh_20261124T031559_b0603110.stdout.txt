@@ -1,0 +1,173 @@
+
+imate Dirac delta distribution differential source-count                                                                                           recalculated to account for an incorrect treatment of signal ac-
+function. In this limited region of parameter space a di-                                                                                          ceptance in the original publication.
+                                                                                                                                                         17
+
+                                                                          Full sky
+                                                                                                infrared, X-ray, or γ-ray energies, mapping from this to
+                                                                          Galactic disk         the neutrino luminosity function involves a number of as-
+                             10−11
+                                                                          SFD dust              sumptions. For an example in the case of blazars, see [81].
+  E 2dΦ̄/dE (TeV cm−2 s−1)
+
+                                                                          Fermi bubble          For these reasons, the model space associated with neu-
+                                                                                                trino sources is significant.
+                             10−12                                                                 One approach to simplifying this space is to consider
+                                                                                                standard candles. Under this approach, the luminos-
+                                                                                                ity function is chosen to be sharply peaked at a certain
+                             10−13                                                              value, denoted Leff , and then the problem is reduced to
+                                                                                                scanning a two dimension space parameterized by the ef-
+                                                                                                fective luminosity, and the density of sources, denoted
+                             10−14     Hotspot Northern Sky Sensitivity
+                                                                                                ρ0 . More quantitatively, following [47], the luminosity
+                                       Hotspot Southern Sky Sensitivity                         function of a standard candle is defined as a log-normal
+                                                                                                distribution with median Leff and a width of 0.01 in
+                                 101                          102                         103
+                                                                 PS                             log10 Leff . This model is then converted to an associated
+                                                             N
+                                                                                                dN/dF using FIRESONG [51], adopting a density evolu-
+Figure 7. The expected sensitivities for four templates when                                    tion for the source population according to the evolution
+n1 = −n2 = 20 is fixed, creating an approximation of an                                         of the star formation rate in [82], and a flat universe with
+equal-flux population of sources. Northern and southern sky                                     ΩM,0 = 0.308, Ωλ,0 = 0.692, and h = 0.678 [83]. These
+hotspot sensitivities for populations of equal-flux source from                                 output source-count distributions were then interfaced
+Aartsen et al. [45] are shown along-side. The hotspot analysis                                  with the NPTF posterior, and the value of M(d; φ) cal-
+represents a traditional approach to point source detection,                                    culated for each point in parameter space. The A and Fb
+where a “hotspot” is defined as a source that is individually                                   parameters scale with ρ0 and Leff respectively, while n1
+detected at 3σ global significance. See text for details.                                       and n2 are set to 1.9 and −2 respectively. A lower limit
+                                                                                                of Leff = 1052 erg yr−1 was chosen to match the prior on
+limits shown in Fig. 5. In each case the significance can                                       Fb . The result is shown in Fig. 10, and – consistent with
+be quantified as follows:                                                                       our previous results – we see no evidence for any partic-
+             • Full sky: ln BNP/P = −0.79, p-value = 0.66;                                      ular source class. These results, in addition to allowing
+                                                                                                a comparison with searches for source populations with
+             • Fermi Bubbles: ln BNP/P = −0.94, p-value =                                       fixed flux-characteristics [47], also are representative of
+               0.45;                                                                            the power and generality of the NPTF technique.
+
+             • SFD Dust: ln BNP/P = −0.92, p-value = 0.33;
+               and                                                                                                VI.   CONCLUSION
+             • Galactic Disk: ln BNP/P = −0.97, p-value = 0.74.
+                                                                                                   In this work we have performed the first application of
+The p-values quoted here were determined from the dis-                                          the non-Poissonian template fitting technique to search
+tribution of the background only hypotheses, which were                                         within the IceCube dataset for neutrino point-source
+shown in Fig. 4. From the p-values each signal template                                         populations. Although IceCube presents novel challenges
+is consistent with the Poissonian hypothesis.                                                   to the implementation of the NPTF, our work provides
+   We can also consider the full posterior. In Fig. 9 we                                        an explicit verification that such difficulties can be ad-
+show a triangle plot generated from the posterior for the                                       dressed, and that this technique is a viable method to
+case of the SFD dust signal template. The signal pa-                                            search for such populations. In addition to being able
+rameters are clearly consistent with a background only                                          to search for populations with an, in principle, arbitrary
+hypothesis, and we note that the triangle plots for other                                       source-count function dN/dF , this method also allows
+templates are similar. The posterior for each template                                          us to search for point sources with peculiar spatial distri-
+is made publicly available, and we refer to App. A for                                          butions, and here we have considered spatial templates
+details.                                                                                        following maps of the isotropic sky, Fermi bubbles, SFD
+   The purpose of the public posterior is that they can                                         dust map, and galactic disk. In all cases, no significant
+be used to test any point source population model where                                         evidence of a point-source population has been detected,
+the associated dN/dF can be approximated by a broken                                            and so we have presented limits in their absence, as shown
+power law. There are a wide number of source classes                                            in Fig. 8. Importantly, we have made the full posterior
+which have been considered as possible contributors to                                          from our analysis publicly available, allowing specific the-
+the IceCube neutrino flux. For an overview, see, for ex-                                        ory predictions for contributions to the IceCube flux to
+ample [11]. A fundamental problem, however, is that                                             be tested directly. This is exemplified by the application
+in many cases there remains considerable uncertainty in                                         of our results to the space of standard candle luminosity
+the associated luminosity function. While we often have                                         functions, shown in Fig 10.
+measurements of the photon luminosity function in the                                              There are a number of ways that the analysis presented
+                                                                                                                                                                               18
+
+                             10−10                                                                                    10−10
+                                                                M(d; φ) > 10−2                                                                          M(d; φ) > 10−2
+                                                                               −1
+                                                                M(d; φ) > 10                                                                            M(d; φ) > 10−1
+                             10−11                                                                                    10−11
+    F̄ PS (cm−2 s−1 TeV−1)
+
+
+
+
+                                                                                             F̄ PS (cm−2 s−1 TeV−1)
+                             10−12                                                                                    10−12
+
+
+=====CAPTION=====
+               10−11                                                            E −2 spectrum, as given in (4).
+
+               10−12 52
+                   10             1053            1054              1055
+                                                                                Appendix B: Isotropic Sources in the Northern Sky
+                                         Leff (erg yr−1)
+
+Figure 10. The pointwise likelihood ratio applied to the space                     Traditional searches for extragalactic point sources at
+of standard candle luminosity functions. The standard candle                    IceCube are performed restricting to the northern or
+approach models the luminosity function as sharply peaked in                    southern hemispheres. The motivation for this is the
+Leff , and then the space of possible models is spanned by this                 northern hemisphere, having a lower background, usu-
+parameter and the density of sources, ρ0 . This figure also                     ally has an enhanced sensitivity. In Fig. 11 we show
+allows us to contrast our results with the 90% upper limit                      the expected sensitivity and the pointwise likelihood ra-
+obtained using an analysis for steady point sources with a                      tio determined from the data for the northern sky, which
+specified flux-distribution, as derived in [47]. Both of these
+                                                                                should be contrasted to the full sky result for both hemi-
+results can be compared to a standard candle population of
+sources that is compatible with the observed diffuse flux at                    spheres shown in Figs. 5 and 8. Comparing the two re-
+±1σ, as quoted in [84]. To aid interpretation, we have over-                    sults, it is clear that restricting the NPTF to the lower
+laid the electromagnetic luminosities associated with several                   background hemisphere only marginally improves the
+possible source classes: flat-spectrum radio quasars (FSRQ),                    sensitivity. This suggests that the NPTF results are not
+BL Lacertae active galactic nuclei (BL LAC), galaxy clus-                       being degraded by working with the full sky, and given
+ter, and Fanaroff–Riley Class II radio galaxies (FR-II), fol-                   our inclusion of a number of galactic templates, justifies
+lowing [51, 85]. We emphasize that these are not predicted                      the choice of both hemispheres used in the main text.
+neutrino luminosities, which are unknown, but highlight that
+current measurements provide information about the relative
+neutrino to photon luminosities of these sources. We note
+that the results in this figure were derived using the NPTF
+posterior, described in App. A, and show the power of our
+result to test specific model hypotheses. See text for details.
+
+
+  Appendix A: Description of the Public Posterior
+
+
+   The posterior for each of the four templates can be
+found at https://icecube.wisc.edu/science/data/
+NPTF_7yr_posterior as an HDF5 file. Within the
+file, five tables named Isotropic, Galactic_disk,
+Fermi_bubble, SFD_dust, and Northern_sky contain
+the posterior for their respective templates.
+   Each table describes equally-weighted samples using
+five columns. Four columns, labelled ln_A, ln_Fb, n1,
+and n2 contain the coordinates for the sample in natural
+logarithmic parameter space for the differential source-
+count function normalization A and break Fb , while the
+power indices n1 and n2 are in linear space. The fifth col-
+umn – labelled loglikelihood – gives the natural log-
+arithm of the likelihood function at the location of the
+corresponding sample. In addition, each table has two at-
+tributes named P_log_evidence and NP_log_evidence
+that contain the natural logarithm of the evidence inte-
+gral for the Poissonian model (L0 ) and non-Poissonian
+                                                                                                                                                                                     21
+
+                                                                                                                              10−10
+                                                                             Northern sky                                                                     M(d; φ) > 10−2
+                             10   −11                                                                                                                         M(d; φ) > 10−1
+                                                                                                                              10−11
+
+
+
+
+                                                                                                     F̄ PS (cm−2 s−1 TeV−1)
+    F̄ PS (cm−2 s−1 TeV−1)
+
+
+                                                                                                                              10−12
+                             10−12
+
+                                                                                                                              10−13
+
+                             10−13
+                                             M(d; φ) = 0.1 expt.                                                              10−14
+                                             n1 = −n2 = 2.5 inj. sens.
+                                             n1 = −n2 = 3.5 inj. sens.
+                                                                                                                              10−15
+                             10−14           n1 = −n2 = 4.5 inj. sens.
+                                             Full sky median M(d; φ) = 0.1                                                              Northern sky
+                                                                                                                              10−16 1
+                                    10   1
+                                                         10   2
+                                                                             10   3
+                                                                                            10   4                                10           102     103    104              105
+                                                                   N PS                                                                                N PS
+

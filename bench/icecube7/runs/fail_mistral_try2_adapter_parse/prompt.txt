@@ -1,0 +1,34 @@
+The IceCube 7-year point-source data release (IceCube Collaboration 2019,
+"Bayesian posterior for IceCube 7-year point-source search with neutrino-count
+statistics", doi:10.21234/dtrs-e557) accompanies the paper "A Search for Neutrino
+Point-source Populations in 7 yr of IceCube Data with Neutrino-count Statistics"
+(ApJ 893 (2020) 102, arXiv:1909.08623; its text is paper.txt in this directory).
+
+The release (posterior.h5 with the posterior samples, the release's example.py code
+and its readme.txt) has already been ingested into a running clio-core runtime by
+the OMNI file ice_omni.yaml in this directory. Do NOT download anything: read the
+data and the code from clio-core.
+
+How to read it: in a shell, run `source ./clio_env.sh` and use the Python at
+/tmp/claude-36126/-home-hyoklee-aurora/7e1b65af-7054-4a75-8def-00dce7042087/scratchpad/venv/bin/python (numpy, scipy, matplotlib, h5py are installed; PyTables and LaTeX
+are not). `import cte_ice as ci` (cte_ice.py is in this directory; read its
+docstring): ci.manifest() lists every ingested object and its tag,
+ci.read_table(tag) returns an HDF5 table as a numpy structured array,
+ci.read_attributes(tag) returns HDF5 attributes as a dict, ci.read_text(tag) returns
+a text file (the release's example.py and readme.txt).
+
+The clio-core runtime holding the data is already running: do not start, stop or
+restart any clio runtime or server, and do not read the data from anywhere else.
+If you cannot connect, stop and report the error.
+
+Task: regenerate Figure 10 of the paper (the pointwise likelihood ratio over the
+space of standard candle luminosity functions, with the electromagnetic source
+classes marked) from the posterior stored in clio-core.
+
+Deliverables, in this directory:
+1. fig10.py - the script, reading all data and parameters from clio-core.
+2. fig10.png - the regenerated Figure 10.
+3. answer.md - how the figure was computed (template, parameters, contour levels),
+   the log Bayes factors of the two example models in the release's example code,
+   how fig10.png compares with Figure 10 in the paper, and how long reading the data
+   from clio-core took.

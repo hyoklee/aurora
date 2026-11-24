@@ -1,0 +1,8 @@
+preflight: 9 ice tags
+{"model":"mistral-large-4","rc":0,"wall_s":1481}
+preflight: 9 ice tags
+{"model":"beam-1.0-fp8","rc":0,"wall_s":9}
+preflight: 9 ice tags
+{"model":"nemotron-35-super-vl","rc":0,"wall_s":295}
+preflight: 9 ice tags
+{"model":"muse-spark-bf16","rc":0,"wall_s":8}

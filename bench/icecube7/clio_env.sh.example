@@ -1,0 +1,6 @@
+B=$HOME/clio-core.dataverse/build/bin
+export LD_LIBRARY_PATH=$B:/opt/aurora/26.181.0/oneapi/compiler/latest/lib:/home/hyoklee/miniconda3/envs/iowarp/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export PATH=$B:$PATH
+export PYTHONPATH=$B
+export CLIO_SERVER_CONF=/home/hyoklee/aurora/bench/icecube7/clio_ice.yaml
+export CAE_DATAVERSE_CACHE=${ICE_SCRATCH:?}/ice/dvcache

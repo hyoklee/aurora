@@ -1,0 +1,27 @@
+# OMNI: ingest the IceCube 7-year point-source Bayesian posterior data release
+# (doi:10.21234/dtrs-e557; paper arXiv:1909.08623, ApJ 893 (2020) 102) into
+# clio-core straight from the IceCube web site -- no manual download or unzip.
+# Run with
+#   clio-cae ice_omni.yaml     (clio-core with CAE http + zip + HDF5 support)
+#
+# The release is one 12 MB zip. The CAE range-reads its directory, then only
+# the three members selected below (the macOS __MACOSX/ copies are skipped):
+#   ice/<zip>/posterior.h5   HDF5 (PyTables): one table per spatial template;
+#                            each table becomes tag ice/<zip>/posterior.h5/<table>
+#                            (blob "description" = compound<...>{field:type@off},
+#                            blob "attributes" = JSON with P_/NP_log_evidence,
+#                            chunk_0.. = packed records). The file tag
+#                            ice/<zip>/posterior.h5 holds the root "attributes"
+#                            (priors, units).
+#   ice/<zip>/example.py     the release's analysis code (binary tag)
+#   ice/<zip>/readme.txt     the release's description (binary tag)
+# The tag "ice" holds a "manifest" blob listing every ingested object.
+transfers:
+  - src: "https://icecube.wisc.edu/data-releases/20190904_Bayesian_posterior_for_IceCube_7-year_point-source_search_with_neutrino-count_statistics.zip"
+    dst: "iowarp::ice"
+    format: "hdf5"
+    dataset_filter:
+      include_patterns:
+        - "*.zip/posterior.h5"
+        - "*.zip/example.py"
+        - "*.zip/readme.txt"
