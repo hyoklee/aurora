@@ -1,0 +1,46 @@
+== reading the IceCube 7-yr posterior release from clio-core ==
+zip tag prefix : ice/20190904_Bayesian_posterior_for_IceCube_7-year_point-source_search_with_neutrino-count_statistics.zip
+posterior.h5   : tag ice/20190904_Bayesian_posterior_for_IceCube_7-year_point-source_search_with_neutrino-count_statistics.zip/posterior.h5 (15613304 bytes in clio-core)
+Isotropic table: 75533 rows, fields ('ln_A', 'ln_Fb', 'loglikelihood', 'n1', 'n2')
+units: ln_A [Natural log cm^2 s GeV], ln_Fb [Natural log cm^-2 s^-1 GeV^-1], n1/n2 [Unitless]/[Unitless]
+prior densities: ln_A=0.0310210344 ln_Fb=0.0394813165 n1=0.125 n2=0.125
+evidences (Isotropic): P_log_evidence=-96374.714681  NP_log_evidence=-96375.507844  -> integrated ln B_NP/P = -0.793163
+example.py read from clio-core: 8544 chars, sha256=cd3159e413d64546
+
+== Fig-10 parameters parsed from the release's example.py ==
+log10 L_eff range [52.  55.5], log10 rho0 range [-12.  -5.], 100 x 100 grid
+conversion: log10 Fb = log10 L_eff -65 ; log10 A = log10 rho0 +25
+fixed n1=1.9, n2=-2.0 ; model prior pi_NP=0.5 ; contour levels (ln M) [  -4.60517019   -2.30258509 1000.        ] labels ['10^{-2}', '10^{-1}', 'max']
+standard candles (rho0 [Mpc^-3], L_eff [erg/yr]):
+[[1.00000000e-09 6.86648845e-08 1.34664059e-06 5.17947468e-08]
+ [1.06420924e+55 1.00000000e+54 1.54592774e+53 1.28264983e+52]]
+
+prior density (product) = 1.91367387e-05 ; ln prior = -10.863901
+
+== log Bayes factors of the two example models in example.py ==
+model {'ln_A': np.float64(36.841361487904734), 'ln_Fb': np.float64(-27.631021115928547), 'n1': 1.9, 'n2': -2.0} -> ln B_NP/P = -1.685915
+model {'ln_A': np.float64(39.14394658089878), 'ln_Fb': np.float64(-29.933606208922594), 'n1': 1.9, 'n2': -2.0} -> ln B_NP/P = -0.979523
+
+== pointwise likelihood ratio over the standard-candle space ==
+ln M over the grid: min -29.768, max -1.137 at log10 L_eff=52.354, log10 rho0=-10.939
+grid fraction with ln M > -4.6052  (M > 10^-2): 0.5976
+grid fraction with ln M > -2.3026  (M > 10^-1): 0.3317
+M at the four electromagnetic standard candles (arXiv:1411.4385):
+  FSRQ            L_eff=1.0642e+55 erg/yr, rho0=1.0000e-09 Mpc^-3 -> ln M = -7.1368 (M = 7.953e-04)
+  BL LAC          L_eff=1.0000e+54 erg/yr, rho0=6.8665e-08 Mpc^-3 -> ln M = -6.9592 (M = 9.499e-04)
+  Galaxy Clusters L_eff=1.5459e+53 erg/yr, rho0=1.3466e-06 Mpc^-3 -> ln M = -5.7574 (M = 3.159e-03)
+  FR-II           L_eff=1.2826e+52 erg/yr, rho0=5.1795e-08 Mpc^-3 -> ln M = -1.5468 (M = 2.129e-01)
+
+== plotting fig10.png ==
+wrote /tmp/claude-36126/-home-hyoklee-aurora/7e1b65af-7054-4a75-8def-00dce7042087/scratchpad/ice/runs/agent097_mistral-large-4/fig10.png
+
+== timings ==
+  manifest()                                       0.006 s
+  read_attributes(posterior.h5 root)               0.000 s
+  read_attributes(Isotropic)                       0.000 s
+  read_table(Isotropic)                            0.005 s
+  read_text(example.py)                            0.000 s
+  read_text(readme.txt)                            0.000 s
+  gaussian_kde build (75533 samples)               0.004 s
+  ln M on the 10000-point grid                    16.934 s
+  TOTAL                                           16.951 s

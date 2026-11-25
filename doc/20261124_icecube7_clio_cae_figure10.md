@@ -21,6 +21,9 @@ arXiv:1909.08623).
 - The other three models (mistral, beam, muse) stopped on replies CLIO could
   not parse.
 
+**Update 2026-11-25:** with clio-agent 0.9.7.1 plus six fixes, all four models
+regenerate Figure 10. See `doc/20261125_icecube7_clio_agent_097_all_models.md`.
+
 ## 1. The release and what CAE had to learn
 
 The release is one 12 MB zip with three files:

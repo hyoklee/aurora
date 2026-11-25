@@ -1,0 +1,6 @@
+== muse-spark-bf16 11:00:22
+{"model":"muse-spark-bf16","rc":0,"wall_s":405}
+== beam-1.0-fp8 11:07:16
+{"model":"beam-1.0-fp8","rc":0,"wall_s":170}
+== mistral-large-4 11:10:15
+{"model":"mistral-large-4","rc":0,"wall_s":2677}

@@ -1,0 +1,23 @@
+template tag           : ice/20190904_Bayesian_posterior_for_IceCube_7-year_point-source_search_with_neutrino-count_statistics.zip/posterior.h5/Isotropic
+posterior samples      : 75533 rows, fields ('ln_A', 'ln_Fb', 'loglikelihood', 'n1', 'n2')
+Leff_lims (log10)      : [52.0, 55.5]  rho0_lims (log10): [-12.0, -5.0]  grid: 100 x 100
+log10 Fb = log10 Leff + -65    log10 A = log10 rho0 + 25
+fixed grid indices     : n1 = 1.9  n2 = -2.0   model_prior = 0.5
+contour levels (ln M)  : [np.float64(-4.605170185988092), np.float64(-2.302585092994046), 1000]  labels: ['10^{-2}', '10^{-1}', 'max']
+line colors: ['k', 'w', 'w']  fill colors: ['indigo', 'mediumseagreen', 'b']
+prior densities        : {'prior_ln_A': 0.031021034421660845, 'prior_ln_Fb': 0.039481316536659254, 'prior_n1': 0.125, 'prior_n2': 0.125}  product = 1.9136738739003036e-05
+P_log_evidence         : -96374.71468108657
+NP_log_evidence        : -96375.5078438657
+Log Bayes Factor for model {'ln_A': np.float64(36.841361487904734), 'ln_Fb': np.float64(-27.631021115928547), 'n1': 1.9, 'n2': -2} = np.float64(-1.6859153734403662)
+Log Bayes Factor for model {'ln_A': np.float64(39.14394658089878), 'ln_Fb': np.float64(-29.933606208922594), 'n1': 1.9, 'n2': -2} = np.float64(-0.9795234236662509)
+ln M grid: 10000 points evaluated in 16.36 s; ln M range [-29.768, -1.137]
+wrote /tmp/claude-36126/-home-hyoklee-aurora/7e1b65af-7054-4a75-8def-00dce7042087/scratchpad/ice/runs/agent097_mistral-large-4/fig10.png
+
+clio-core read timings (s):
+  manifest()                               0.0136
+  read_text(example.py)                    0.0001
+  read_text(readme.txt)                    0.0001
+  read_attributes(posterior.h5 root)       0.0001
+  read_attributes(Isotropic table)         0.0001
+  read_table(Isotropic posterior samples)  0.0051
+  TOTAL                                    0.0191
