@@ -126,4 +126,5 @@ CLIO fail the turn visibly instead.
   for the four successful runs
 - `bench/icecube7/runs/v097/fail*`, `timeout*`, `invalid*`: failure evidence
 - clio-agent: `hyoklee/clio-agent` branch `fix/model-shell-cte-pool-binding`
-  (6 commits on upstream main 5ced7a786; not yet proposed upstream)
+  (6 commits on upstream main 5ced7a786), proposed upstream as
+  [iowarp/clio-agent#2402](https://github.com/iowarp/clio-agent/pull/2402)
