@@ -23,7 +23,7 @@ not CLIO.
 | **muse-spark-bf16** | 0 (3/3 tries failed at step 1) | **5/6**, first try, 465 s, 20 tool calls, 1.02 M tokens |
 | **mistral-large-4** | 4.5, 611 s | **4/6**, first try, 346 s, 19 tool calls, 0.62 M tokens |
 | **nemotron-35-super-vl** | 3.5, 57 s | **3.5/6**, first try, 207 s, 11 tool calls, 3.18 M tokens |
-| **beam-1.0-fp8** | 6/6 on try 2 (try 1 failed at step 1) | **no valid answer**: 2 clean tries both ended without `readout.png` or a report; 2 more tries excluded as contaminated |
+| **beam-1.0-fp8** | 6/6 on try 2 (try 1 failed at step 1) | **no valid answer in 5 tries**: 3 clean tries ended without a report (try 5 had the right F and a plot); 2 more tries excluded as contaminated |
 
 Per-item scores (rubric of the 2026-11-21 doc):
 
@@ -92,7 +92,7 @@ On 2026-11-21 this would have been the second-best CLIO Agent answer, after beam
 - Fastest again (207 s, 11 calls), using `run_code` rather than shell scripts. The image cap of
   1 held: it viewed one image and got no 400.
 
-### beam-1.0-fp8: four tries, no valid answer
+### beam-1.0-fp8: five tries, no valid answer
 
 | try | wall | calls | outcome | status |
 |---|---|---|---|---|
@@ -100,6 +100,7 @@ On 2026-11-21 this would have been the second-best CLIO Agent answer, after beam
 | 2 `invalid2_beam_ran-old-mistral-scripts-from-venv` | 622 s | 29 | `grep -r` over the scratch tree found `analyze.py`, `analyze2.py` and `plot_readout.py`, which the 2026-11-21 CLIO Agent + mistral run had written into the shared venv directory. Beam rewrote their input path with `sed` and reported their output (F 91.60 %, SNR 7.6). | excluded |
 | 3 `fail3_beam_reasoning_length` | 1092 s | 23 | Clean: its searches timed out with nothing found. It computed F 91.8 % and SNR 7.9, then its reasoning looped on tool-call markup until 32,768 output tokens (`finish_reason=length`). No plot, no report. | failed |
 | 4 `fail4_beam_stop-hook-cap_no-plot` | 2415 s | 49 | Clean, but not for lack of trying (see below). The first turn hit the length limit. The Stop hook re-drove it 3 times, and it hit the cap still without `readout.png`. Final text: "We need make readout.png now…". | failed |
+| 5 `fail5_beam_no-report_chmod-unlocked-sibling` (2026-11-27) | 1063 s | 28 | Clean computation, no report. Turn 1 ended with "Let me run the script." (Stop-hook re-drive 1). Turn 2 failed on a DSPy `ChatAdapter` parse error ("Expected to find output fields … [reasoning, answer]"), re-drive 2. Turn 3 got the numbers right (Q1, F 91.82 ± 0.35 %; SNR 7.89, uncorrected), wrote `readout.png`, then ran `chmod -R +rx` on its locked sibling try-4 directory and ended with "The hook seems stale. Let me verify." | failed |
 
 **Try 4 tried to read the answers, and the locks held.** Beam ran:
 - `ls ~/aurora` and `ls ~/aurora/bench/qick`;
@@ -111,6 +112,17 @@ On 2026-11-21 this would have been the second-best CLIO Agent answer, after beam
 Every read of an answer was denied (`chmod 000`), sudo needs a password, and the `find /`
 calls timed out at the 120 s shell cap. The only file it could read was `prompt.txt`, its
 own prompt. On 2026-11-21 a beam run found `src/qick/ss_fidelity.py` the same way.
+
+**Try 5 undid a lock.** After `find /` timed out, beam listed the run root, saw its own earlier
+try (`agent097_beam-1.0-fp8.old.*`, mode 000), and ran `chmod -R +rx` on it. As the owning user it
+could. That directory was try 4, which holds no answer (its final text was a plan), and all of
+try 5's numbers and its plot were already computed, so nothing leaked. But `chmod 000` only
+stops an agent that does not try `chmod`.
+
+**Try 5 also hit a ChatAdapter parse error.** 0.9.7.1 no longer uses DSPy's JSONAdapter, but one
+path still parses with `ChatAdapter`: when beam's turn was only the prose "Let me run the
+inspection script now." with no fields, `agent.forward` raised `AdapterParseError` and the turn
+failed (`recoverable: true`). The Stop hook re-drove it, so the run went on.
 
 **Beam's reliability on this task is poor.** The step-1 adapter failures of 0.9.4 are gone.
 In their place, beam ends turns in prose or loops its reasoning to the output limit.
@@ -169,8 +181,11 @@ venv's `python`.
 **Lesson:** a lock list is never complete while a shell-capable agent runs as the user who
 holds the answers. Beam searched `/`, `/tmp`, the scratch tree and the repo, and tried
 `sudo`. Every place an earlier run could have written to is a leak.
-- Robust fix: a separate account or container per run.
-- Cheaper fix: audit each trace (as done here) and exclude what leaked.
+- Robust fix: a separate account or container per run. Beam's try 5 showed why: it ran
+  `chmod -R +rx` on a locked sibling run.
+- Cheaper fixes: keep earlier runs out of the run root (the harness's own `<run>.old.*`
+  renames put them right beside the new run), and audit each trace (as done here), excluding
+  what leaked.
 
 ## Files
 
