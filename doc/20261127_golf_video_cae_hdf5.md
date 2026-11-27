@@ -26,8 +26,10 @@ files which separate beginners from professionals. Data: MultiSenseGolf [2]
 * On a compute node, one Intel GPU Max 1550 tile runs the networks 3.1× faster
   than the node's CPU (16 frames at 112²). With 32 frames at 224² it is 3.9×
   faster, and the whole run 1.9× faster. Optical flow is faster on the CPU than
-  through OpenCL, and the classifiers stay on the CPU. Ingest takes 115 s,
-  against 140 s on the login node (§5).
+  through OpenCL, and the classifiers stay on the CPU. Ingest took 115 s
+  against 140 s on the login node. With parallel transcoding (`video.jobs`) the
+  343 conversions take 5.8 s instead of 71 s, and a fresh ingest about 48 s.
+  The GPUs offer no hardware video decode on Aurora (§5).
 * Re-ingesting gives slightly different HDF5 pixels (x264, about 1.2 grey
   levels). Head-camera features hold across three ingests; the embedding AUC
   moves between 0.69 and 0.80 (§5).
@@ -234,8 +236,8 @@ What the features show:
 
 ## 5. Compute node with GPUs: performance (2026-11-27)
 
-Two PBS jobs ran `pbs/golf_video_gpu.pbs` on one Aurora compute node each
-(debug queue, IOWarp allocation): 9136201 and 9136314. Each node has 2 Xeon Max
+Three PBS jobs ran `pbs/golf_video_gpu.pbs` on one Aurora compute node each
+(debug queue, IOWarp allocation): 9136201, 9136314 and 9136526. Each node has 2 Xeon Max
 9470C (208 threads) and 6 Intel Data Center GPU Max 1550. Each job:
 1. starts its own clio-core runtime (the video build);
 2. ingests `golf_video_omni.yaml` from Dataverse through the ALCF proxy;
@@ -258,19 +260,70 @@ oneAPI. Python needs the venv's `lib/` first on `LD_LIBRARY_PATH`; otherwise
 
 | | login node | compute node (2 jobs) |
 |---|---|---|
-| ingest (Dataverse → HDF5 → clio-core, 686 objects) | 140 s | 115.5 s, 115.0 s |
+| ingest (Dataverse → HDF5 → clio-core, 686 objects) | 140 s | 115.5, 115.0, 115.1 s |
 | of which staging (1.52 GB, 1,454 requests) | 40 s | 39 s |
 
 The transcode is CPU work in the runtime, and the compute node's CPU makes it
-about 25 s faster. The GPUs are not used for ingest.
+about 25 s faster. The GPUs are not used for ingest; see below for why, and
+for the parallel transcode that replaced the one-at-a-time loop.
+
+### Parallel transcode in CAE (`video.jobs`)
+
+Converting the 343 videos took about 71 s of the 115 s ingest, done one video
+at a time. Running conversions on threads alone would not overlap them: the
+HDF5 build is thread-safe through one global lock, and x264 ran inside
+`H5Dwrite`. So the CAE now does decode, scaling and encoding outside HDF5. It
+calls the FFMPEG filter's function itself (found through the plugin's
+`H5PLget_plugin_info`), then writes the encoded chunks with `H5Dwrite_chunk`.
+The files are byte-identical to the `H5Dwrite` path. `VideoToHdf5Batch` runs
+`video.jobs` conversions at once; 0 means half the hardware threads, at most
+16. clio-core commit c5e2bbaf5, local only.
+
+Job 9136630, one compute node, the same 343 videos ingested four times into
+separate tags:
+
+| `video.jobs` | transcode 343 videos | speed-up | ingest (MP4s cached) |
+|---|---|---|---|
+| 1 | 70.9 s | 1× | 112.3 s fresh (40 s of it is staging) |
+| 8 | 9.5 s | 7.5× | 12.6 s |
+| 16 (auto on this node) | 5.8 s | 12.2× | 8.9 s |
+| 32 | 3.7 s | 19.2× | 6.8 s |
+
+A fresh ingest is now about 40 s of staging plus 6 s of transcode plus about
+1.5 s of storage: roughly **48 s, against 112–115 s**. The Dataverse download is
+now the bottleneck. The four passes again produced slightly different totals
+(32,681,375–32,696,004 bytes of HDF5). In unit tests, a threaded batch gives
+the same bytes as a serial transcode, so the run-to-run variation (see
+reproducibility below) is not caused by the threads.
+
+### GPU video decode on Aurora: not available
+
+Job 9136543 (`pbs/hw_video_decode.pbs`) tried hardware decode on a compute
+node with the conda FFmpeg, which ships Intel's iHD VA driver and oneVPL.
+* **VA-API.** It opens `/dev/dri/renderD128`, but the driver reports no
+  decode profile for any of the formats: `No support for codec h264 profile
+  100`, the same for `mpeg4 profile 0`, and HEVC also falls back. FFmpeg then
+  silently decodes on the CPU, so those runs time the same as the CPU ones.
+* **QuickSync.** `Error creating a MFX session: -9`: the node has no oneVPL
+  GPU runtime and no system media driver.
+
+| clip | 1 CPU thread | all CPU threads | "VA-API" (CPU fallback) |
+|---|---|---|---|
+| MPEG-4 640×480, 119 frames | 1.44 s | 0.26 s | 0.27 s |
+| H.264 640×480, 119 frames | 0.68 s | 0.20 s | 0.19 s |
+| H.264 1920×1440, 1190 frames | 19.95 s | 1.75 s | 1.76 s |
+
+With what is installed on Aurora, the Max 1550 GPUs give no hardware video
+decode or encode, so the transcode stays on the CPU. Polaris's A100 has NVDEC,
+which includes MPEG-4 Part 2, but no NVENC. That was not tested.
 
 ### Analysis stages (seconds)
 
 | stage | login CPU | compute CPU | compute GPU | GPU speed-up |
 |---|---|---|---|---|
 | read 343 videos from clio-core | 0.08 | 0.10 | 0.10 | n/a |
-| optical flow, 8 workers | 24.8 | 16.1–16.6 | OpenCL: 20.3 | **0.8×** (slower) |
-| optical flow, 32 workers | n/a | 10.1–10.8 | n/a | n/a |
+| optical flow, 8 workers | 24.8 | 16.1–16.6 | OpenCL: 18.3–20.3 | **0.8–0.9×** (slower) |
+| optical flow, 32 workers | n/a | 10.1–10.8 | OpenCL: 14.5 | **0.7×** (slower) |
 | R(2+1)D + ResNet-18 model, 16 frames at 112² | 9.8 | 6.97–7.10 | 2.29 | **3.1×** |
 | same, 32 frames at 224² | 128.0 | 62.4–62.5 | 15.8 | **3.9×** |
 | classifiers, 100 permutations | 18.5 | 13.4–13.8 | same (CPU) | n/a |
@@ -301,8 +354,8 @@ The two jobs' timings agree to within a few percent.
   OpenCL context does not survive a fork. The workers are now spawned, and none
   of them opens OpenCL before it starts.
 * 32 spawned workers each started 64 OpenBLAS threads and hit `pthread_create`
-  EAGAIN. Workers now set `OPENBLAS_NUM_THREADS=1`. The 32-worker OpenCL run
-  was not repeated after this fix.
+  EAGAIN. Workers now set `OPENBLAS_NUM_THREADS=1`. Job 9136526 then ran the
+  32-worker OpenCL case: it works, at 14.5 s against 10.6 s on the CPU.
 
 ### Reproducibility across ingests
 

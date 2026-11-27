@@ -1,0 +1,60 @@
+#!/bin/bash
+#PBS -N golf_video_ingest_jobs
+#PBS -l select=1
+#PBS -l walltime=00:30:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A IOWarp
+#PBS -o /lus/flare/projects/IOWarp/hyoklee/golfvideo_gpu/run/golf_video_ingest_jobs.out
+#PBS -e /lus/flare/projects/IOWarp/hyoklee/golfvideo_gpu/run/golf_video_ingest_jobs.err
+
+# CAE video ingest with parallel transcoding (OMNI video.jobs) on one Aurora
+# compute node: bench/golf/golf_video_omni.yaml ingested once per jobs value,
+# each into its own tag (golfvideo_j<N>) of one clio-core runtime. The first
+# pass also stages the MP4s from Dataverse; later passes reuse the CAE cache,
+# so compare the "transcoded ... in X s" lines, not only the totals.
+# GOLF_INGEST_JOBS (qsub -v) picks the jobs values, default "1 8 16 32".
+set -uo pipefail
+GV=/lus/flare/projects/IOWarp/hyoklee/golfvideo_gpu
+GOLF=/home/hyoklee/aurora/bench/golf
+RUN=$GV/run/${PBS_JOBID%%.*}
+LOCAL=/tmp/golfvideo_${PBS_JOBID%%.*}
+mkdir -p "$RUN" "$LOCAL"
+cd "$RUN"
+exec > >(tee -a "$RUN/job.log") 2>&1
+
+export https_proxy=http://proxy.alcf.anl.gov:3128 http_proxy=http://proxy.alcf.anl.gov:3128
+export GOLF_SCRATCH=$LOCAL CLIO_VIDEO_BUILD=$GV/clio-build-video H5FFMPEG_PLUGIN_DIR=$GV/h5plugin
+source "$GOLF/clio_video_env.sh.example"
+
+echo "== node $(hostname)  $(date)"
+(setsid nohup clio_run start > "$RUN/runtime.log" 2>&1 < /dev/null &)
+for i in $(seq 60); do ss -ltn | grep -q :9513 && break; sleep 1; done
+ss -ltn | grep -q :9513 || { echo "runtime did not come up"; exit 1; }
+
+for j in ${GOLF_INGEST_JOBS:-1 8 16 32}; do
+  y=$RUN/omni_j$j.yaml
+  sed -e "s|iowarp::golfvideo\"|iowarp::golfvideo_j$j\"|" \
+      -e "s|^      jobs: .*|      jobs: $j|" "$GOLF/golf_video_omni.yaml" > "$y"
+  grep -q "golfvideo_j$j" "$y" && grep -q "jobs: $j" "$y" || { echo "bad $y"; exit 1; }
+  echo "== ingest jobs=$j"
+  t0=$(date +%s.%N)
+  if ! clio-cae "$y" > "$RUN/omni_j$j.log" 2>&1; then
+    echo "clio-cae failed: $(sed 's/\x1b\[[0-9;]*m//g' "$RUN/omni_j$j.log" | grep -m1 -E 'Error|ERROR')"
+    continue
+  fi
+  for i in $(seq 900); do
+    grep -q "ingested .* objects under 'golfvideo_j$j'" "$RUN/runtime.log" && break
+    grep -q -E "DataverseFileAssimilator: .*(failed|refusing)" "$RUN/runtime.log" &&
+      { echo "ingest failed:"; grep -m3 -E "DataverseFileAssimilator: .*(failed|refusing)" "$RUN/runtime.log"; break; }
+    sleep 1
+  done
+  t1=$(date +%s.%N)
+  sed 's/\x1b\[[0-9;]*m//g' "$RUN/runtime.log" |
+    grep -E "staged [0-9]+ objects|transcoded [0-9]+ videos|ingested .* 'golfvideo_j$j'" |
+    tail -3 | sed 's/.*DataverseFileAssimilator: /  /'
+  awk -v a="$t0" -v b="$t1" -v j="$j" 'BEGIN { printf "ingest jobs=%s: %.1f s\n", j, b - a }'
+done
+
+echo "== stop runtime  $(date)"
+clio_run stop > /dev/null 2>&1 || pkill -f "clio_run start"

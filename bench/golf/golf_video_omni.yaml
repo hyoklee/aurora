@@ -12,7 +12,8 @@
 # plus their frame-timestamp CSVs. The members are range-read out of the remote
 # zips; the depth PNG frames and all other swings are not downloaded.
 #
-# The video block transcodes each selected .mp4 to HDF5 before ingest:
+# The video block transcodes each selected .mp4 to HDF5 before ingest, several
+# at a time (jobs):
 #   /frames  uint8 [T, H, W]  luma at width 320, x264 crf 23 via the FFMPEG
 #                              HDF5 filter (id 32030)
 #   /time_s  float64 [T]      frame times
@@ -49,3 +50,4 @@ transfers:
       codec: x264
       crf: 23
       preset: medium
+      jobs: 0          # videos transcoded at once; 0 = half the cores, at most 16

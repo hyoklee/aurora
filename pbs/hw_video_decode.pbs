@@ -1,0 +1,58 @@
+#!/bin/bash
+#PBS -N hw_video_decode
+#PBS -l select=1
+#PBS -l walltime=00:15:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A IOWarp
+#PBS -o /lus/flare/projects/IOWarp/hyoklee/golfvideo_gpu/hwdec/hw_video_decode.out
+#PBS -e /lus/flare/projects/IOWarp/hyoklee/golfvideo_gpu/hwdec/hw_video_decode.err
+
+# Can an Aurora compute node's Intel Data Center GPU Max 1550 decode video in
+# hardware (VA-API / Quick Sync)? Decodes golf swing clips (MPEG-4 Part 2 source,
+# and H.264 / HEVC re-encodes of it) on the CPU and on the GPU, and times them.
+# Clips: $D/src_{mpeg4,h264,hevc}.mp4 (640x480, 119 frames) and big_h264.mp4
+# (1920x1440, 1190 frames). FFmpeg: conda env ffdev (has iHD and libvpl).
+set -uo pipefail
+D=/lus/flare/projects/IOWarp/hyoklee/golfvideo_gpu/hwdec
+E=/home/hyoklee/miniconda3/envs/ffdev
+FF=$E/bin/ffmpeg
+export LIBVA_DRIVERS_PATH=$E/lib/dri LIBVA_DRIVER_NAME=iHD
+cd "$D"
+exec > >(tee "$D/hw_video_decode.log") 2>&1
+
+echo "== node $(hostname)"
+ls -l /dev/dri | head -20
+ls /usr/lib64 | grep -i -E "mfx|vpl|libva" | head
+ls /usr/lib64/dri 2>/dev/null | grep -i ihd
+REN=$(ls /dev/dri/renderD* | head -1)
+echo "render node: $REN"
+echo "== vainfo (conda iHD)"
+if [ -x "$E/bin/vainfo" ]; then "$E/bin/vainfo" --display drm --device "$REN" 2>&1 | head -60
+else echo "no vainfo in $E/bin"; fi
+
+dec() {  # label, ffmpeg input args...
+  local label=$1; shift
+  local t0 t1
+  t0=$(date +%s.%N)
+  if "$FF" -hide_banner -v error -nostats "$@" -f null - > "$D/dec_$label.err" 2>&1; then
+    t1=$(date +%s.%N)
+    awk -v a="$t0" -v b="$t1" -v l="$label" 'BEGIN { printf "%-28s ok   %.2f s\n", l, b - a }'
+  else
+    echo "$label FAILED: $(head -c 400 "$D/dec_$label.err" | tr '\n' ' ')"
+  fi
+}
+for c in mpeg4 h264 hevc; do
+  echo "== $c (640x480, 119 frames)"
+  dec "${c}_cpu_1thread" -threads 1 -i "src_$c.mp4"
+  dec "${c}_cpu_auto" -i "src_$c.mp4"
+  dec "${c}_vaapi" -hwaccel vaapi -hwaccel_device "$REN" -hwaccel_output_format vaapi -i "src_$c.mp4"
+done
+dec h264_qsv_decoder -init_hw_device "qsv=hw:$REN" -c:v h264_qsv -i src_h264.mp4
+dec hevc_qsv_decoder -init_hw_device "qsv=hw:$REN" -c:v hevc_qsv -i src_hevc.mp4
+echo "== big H.264 (1920x1440, 1190 frames)"
+dec big_cpu_1thread -threads 1 -i big_h264.mp4
+dec big_cpu_auto -i big_h264.mp4
+dec big_vaapi -hwaccel vaapi -hwaccel_device "$REN" -hwaccel_output_format vaapi -i big_h264.mp4
+dec big_qsv_decoder -init_hw_device "qsv=hw:$REN" -c:v h264_qsv -i big_h264.mp4
+echo "== done $(date)"
