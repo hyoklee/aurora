@@ -119,10 +119,20 @@ could. That directory was try 4, which holds no answer (its final text was a pla
 try 5's numbers and its plot were already computed, so nothing leaked. But `chmod 000` only
 stops an agent that does not try `chmod`.
 
-**Try 5 also hit a ChatAdapter parse error.** 0.9.7.1 no longer uses DSPy's JSONAdapter, but one
-path still parses with `ChatAdapter`: when beam's turn was only the prose "Let me run the
-inspection script now." with no fields, `agent.forward` raised `AdapterParseError` and the turn
-failed (`recoverable: true`). The Stop hook re-drove it, so the run went on.
+**Try 5 also hit a ChatAdapter parse error.** The cause was beam's output, not the adapter:
+- One step came back with empty content and no tool call. The shell call was inside the
+  leaked reasoning as Harmony/`rfl` markup (`<|start|>advisor to=shell_bash … <rfl:parameter
+  name="command">…`), which the gateway's tool parser did not pick up.
+- The loop takes a reply without a tool call as the answer, here a blank one. After a long
+  turn, a missing answer goes to DSPy's extract (`ChainOfThought`, ChatAdapter fields
+  `reasoning`, `answer`).
+- Beam answered the extract with prose twice ("I'll run the inspection script now.", then
+  the same after the format-correction retry), so the turn failed with `AdapterParseError`
+  (`recoverable: true`). The Stop hook re-drove it and the run went on.
+
+No clio-agent change for this. Upstream deliberately does not re-sample a blank reply
+(`test_blank_tool_free_response_completes_without_resampling`), and the failure cost one
+re-drive. It is a beam/gateway tool-call parsing problem, like the Harmony tag leak (fix 3).
 
 **Beam's reliability on this task is poor.** The step-1 adapter failures of 0.9.4 are gone.
 In their place, beam ends turns in prose or loops its reasoning to the output limit.
@@ -173,6 +183,17 @@ New after this rerun's leaks:
 - **The venv.** It cannot be locked, because the prompt points at its `python`. The
   harness now refuses to start (exit 98) if the venv holds stray files, and sweeps it and
   the run root after each run.
+
+Changed after try 5 (2026-11-27):
+- **Earlier runs leave the run root.** Before each run, every other entry in the run root and
+  the agent-home root moves to `$QICK_SCRATCH/qick_archive/<stamp>/` (locked with the rest of
+  scratch). The harness used to rename the previous run to `<run>.old.*` beside the new one;
+  that is where beam found try 4.
+- **The Stop hook also requires the report.** `deliverables_stop_hook.py --answer-contains
+  VERDICT` denies a turn whose final visible text lacks "VERDICT", so a turn that ends with a
+  plan or a remark is re-driven even when `readout.png` exists.
+- The hook is copied into the agent home before `bench/icecube7` is locked, so a run always
+  uses the current hook.
 
 Validity check for every scored run: its semantic trace lists every tool call (copied as
 `tool_calls.txt`). The muse, mistral and nemotron calls touch only their own workspace and the
