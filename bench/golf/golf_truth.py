@@ -101,6 +101,31 @@ def rot_range_deg(q):
     return np.degrees(2 * np.arccos(dot)).max(axis=0)
 
 
+ADDRESS_FRAMES = 24  # first 0.25 s at 96 Hz: the golfer stands still at address
+
+
+def facing_frame(p):
+    """Positions (T, 21, 3) in the golfer's own frame at address, in cm.
+
+    The capture frame is y-up, but each golfer stood at a different spot and
+    faced a slightly different way, and the inertial suit's global yaw drifts
+    between swings (hip-line heading varies 20-30 deg across swings for P07,
+    P16, P23). So the heading is taken per swing: the horizontal hip line
+    (LeftUpLeg - RightUpLeg) averaged over the address frames. Every golfer in
+    the dataset swings right-handed, so that line points toward the target.
+    Returns positions relative to the hips' address position, with axes
+    0 = toward the target, 1 = up, 2 = toward the ball (target x up).
+    """
+    lu, ru = JOINTS.index("LeftUpLeg"), JOINTS.index("RightUpLeg")
+    line = (p[:ADDRESS_FRAMES, lu] - p[:ADDRESS_FRAMES, ru]).mean(axis=0)
+    t = np.array([line[0], 0.0, line[2]])
+    t /= np.linalg.norm(t)
+    up = np.array([0.0, 1.0, 0.0])
+    axes = np.stack([t, up, np.cross(t, up)])  # rows: target, up, toward ball
+    origin = p[:ADDRESS_FRAMES, 0].mean(axis=0)
+    return (p - origin) @ axes.T
+
+
 def path_len(xy):
     return float(np.sum(np.linalg.norm(np.diff(xy, axis=0), axis=1))) if len(xy) > 1 else np.nan
 
@@ -128,6 +153,15 @@ def swing_features(d):
         f["imc_hip_to_head_cm"] = np.median(np.linalg.norm(rel[:, JOINTS.index("Head")], axis=1))
         f["imc_hip_to_rfoot_cm"] = np.median(np.linalg.norm(rel[:, JOINTS.index("RightFoot")], axis=1))
         f["imc_hips_travel_cm"] = np.ptp(p[:, 0], axis=0).max()
+        if len(p) > ADDRESS_FRAMES:
+            gf = facing_frame(p)  # target, up, toward ball; 0 = hips at address
+            hips, head = gf[:, 0], gf[:, JOINTS.index("Head")]
+            for k, axis in enumerate(("target", "up", "toward_ball")):
+                f[f"imc_hips_range_{axis}_cm"] = np.ptp(hips[:, k])
+                f[f"imc_head_range_{axis}_cm"] = np.ptp(head[:, k])
+            f["imc_hips_max_toward_target_cm"] = hips[:, 0].max()  # slide toward the target
+            f["imc_hips_max_away_target_cm"] = -hips[:, 0].min()  # sway away from it
+            f["imc_head_dip_cm"] = head[:ADDRESS_FRAMES, 1].mean() - head[:, 1].min()
     pL, pR = d["pL"], d["pR"]
     if len(pL) > 2 and len(pR) > 2 and len(pL) == len(pR):
         L, R = pL.reshape(len(pL), -1).sum(1), pR.reshape(len(pR), -1).sum(1)

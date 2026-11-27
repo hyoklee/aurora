@@ -103,7 +103,50 @@ Caveats:
   different spots: P20 is about 1.4 m from the origin. Position magnitudes
   therefore measure where the golfer stood, not their skill. My first pass made
   this mistake (it gave 43 vs 121 cm "hip-to-foot"), and the agent's ranking
-  below did too.
+  below did too. `golf_truth.py` subtracts the hips; since 2026-11-27 it also
+  removes the facing direction (next section).
+
+### Facing-direction normalization (added 2026-11-27)
+
+Subtracting the hips removes where a golfer stood, but not which way they faced.
+That matters for any direction-specific feature, such as sway toward the target.
+`facing_frame()` in `golf_truth.py` puts each swing in the golfer's own frame:
+* **Heading:** the horizontal hip line (left hip minus right hip), averaged over the
+  first 0.25 s (address). All 24 golfers swing right-handed, so it points at the target.
+* **Per swing, not per golfer:** the suit is inertial (Perception Neuron), and its
+  global yaw drifts. The hip-line heading varies 20–30° between swings for P07, P16
+  and P23 (2–10° for most others), so a per-golfer heading would leave that error in.
+* **Axes:** toward the target, up (the capture frame is y-up), and toward the ball
+  (target × up). The origin is the hips' address position.
+* **Checked:** at address the head sits about 48 cm up and 49 cm toward the ball, with
+  the left foot on the target side, for P02, P20 and P23. P07 (a beginner) stands with
+  the head shifted toward the target.
+* **Rejected alternative:** the foot line. The two foot joints are 17–41 cm apart, so
+  their heading is noisier (sd up to 56°).
+
+Nine features were added: hip and head range along each axis, hip slide toward and
+sway away from the target, and head dip. The existing 85 features are unchanged
+(max |Δg| = 0). With 94 features the best BH q is 0.058 (was 0.052).
+
+| # | new feature | Beg. | Int. | Pro | g | AUC | p | p, adj. height |
+|---|---|---|---|---|---|---|---|---|
+| 3 | head range, up (cm) | 17.0 | 25.1 | 24.9 | +1.61 | 0.88 | 0.010 | 0.022 |
+| 26 | hips range, up (cm) | 5.1 | 6.3 | 6.8 | +0.94 | 0.77 | 0.08 | 0.10 |
+| 30 | head range, toward the ball (cm) | 22.8 | 26.0 | 30.1 | +0.91 | 0.88 | 0.010 | 0.10 |
+| 51 | head range, toward the target (cm) | 28.9 | 28.8 | 31.8 | +0.56 | 0.61 | 0.51 | 0.34 |
+| 54 | hips slide toward the target (cm) | 6.7 | 11.8 | 11.0 | +0.52 | 0.66 | 0.33 | 0.31 |
+| 69 | head dip below address (cm) | 6.9 | 4.2 | 8.3 | +0.33 | 0.61 | 0.51 | 0.75 |
+| 77 | hips range, toward the target (cm) | 18.7 | 23.2 | 18.2 | +0.22 | 0.59 | 0.57 | 0.46 |
+
+Reading:
+* **Lateral motion does not separate the groups.** Hip sway and head movement toward
+  the target are about the same for beginners and pros.
+* **Head range, up (#3) is not a clean skill signal.** It is mostly how far the golfer
+  straightens up by the end of the recording: the head rises 17.9 cm above address
+  for pros against 8.6 cm for beginners. But beginners' heads are still rising at 98 %
+  of the recording (pros peak at 90 %), and pros' recordings are longer (4.35 s vs
+  3.40 s). So many beginner recordings probably stop before the finish, and this
+  feature mixes finish posture with the recording window.
 
 ## 3. With vs without clio-core
 
@@ -176,7 +219,7 @@ CTE. None of the three ALCF models finished the analysis:
 * clio-core: `context-assimilation-engine/core/{include/clio_cae/core/factory/dataverse*.h, src/factory/dataverse_*.cc, src/factory/tools/dataverse_tool_main.cc}`, `test/unit/dataverse/`
 * `bench/golf/golf_omni.yaml`: the OMNI file. `clio_golf.yaml` is the runtime config (port 9513). `clio_env.sh.example` sets the environment.
 * `bench/golf/cte_golf.py`: reads tags back as numpy arrays and CSVs.
-* `bench/golf/golf_truth.py`: ground truth and timing (`--source cte|h5`). `results/` holds the ranking, timings and per-swing features.
+* `bench/golf/golf_truth.py`: ground truth and timing (`--source cte|h5`). `results/` holds the ranking, timings and per-swing features (`swing_features_h5.csv`, regenerated 2026-11-27 with the facing-frame features; the data are the same as through CTE).
 * `bench/golf/run_agent_golf.sh`, `prompt.txt`, `runs/`: the agent runs, cold staging log and clio-cae log.
 
 [1] MultiSenseGolf, Scientific Data (2026), https://doi.org/10.1038/s41597-026-08648-4 ; data: https://doi.org/10.7910/DVN/LCCLLW (CC0)
