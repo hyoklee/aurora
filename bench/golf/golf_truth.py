@@ -2,7 +2,7 @@
 Professional golfers, read either from clio-core (after `clio-cae golf_omni.yaml`)
 or straight from the staged HDF5 files (no clio-core), with read timings.
 
-usage: python golf_truth.py --source cte|h5 [--h5-root DIR] [--out DIR]
+usage: python golf_truth.py --source cte|h5 [--h5-root DIR] [--out DIR] [--complete-only]
   cte: needs `source clio_env.sh` (runtime up, data ingested)
   h5 : reads <h5-root>/<zip>/<SwingNN>/<file>.hdf5 (the CAE staging cache)
 """
@@ -102,6 +102,12 @@ def rot_range_deg(q):
 
 
 ADDRESS_FRAMES = 24  # first 0.25 s at 96 Hz: the golfer stands still at address
+# A recording reaches the finish if it runs this long after the strike and the body
+# has settled by the end. Some golfers' recordings stop ~0.6-0.8 s after the strike
+# with the body still moving (P01, P07, P08, P10, P18), which cuts every
+# whole-swing range (rotation, head rise) short.
+MIN_AFTER_STRIKE_S = 1.0
+MAX_END_MOTION = 0.10
 
 
 def facing_frame(p):
@@ -162,6 +168,15 @@ def swing_features(d):
             f["imc_hips_max_toward_target_cm"] = hips[:, 0].max()  # slide toward the target
             f["imc_hips_max_away_target_cm"] = -hips[:, 0].min()  # sway away from it
             f["imc_head_dip_cm"] = head[:ADDRESS_FRAMES, 1].mean() - head[:, 1].min()
+        # Recording window (not ranked): seconds after the strike (peak trail-hand
+        # acceleration) and how much the body still moves in the last 0.25 s,
+        # as a share of the swing's peak mean joint speed. The derived acceleration
+        # is 8 frames shorter than the positions; that 0.08 s is ignored here.
+        if len(ac) > ADDRESS_FRAMES and len(p) > ADDRESS_FRAMES:
+            strike = int(np.argmax(np.linalg.norm(joints3(ac)[:, JOINTS.index("RightHand")], axis=1)))
+            f["rec_after_strike_s"] = (len(p) - strike) / FS_PNS
+            speed = np.linalg.norm(np.diff(p, axis=0), axis=2).mean(axis=1)
+            f["rec_end_motion_frac"] = speed[-ADDRESS_FRAMES:].mean() / speed.max()
     pL, pR = d["pL"], d["pR"]
     if len(pL) > 2 and len(pR) > 2 and len(pL) == len(pR):
         L, R = pL.reshape(len(pL), -1).sum(1), pR.reshape(len(pR), -1).sum(1)
@@ -218,6 +233,10 @@ def main():
     ap.add_argument("--h5-root")
     ap.add_argument("--out", default=".")
     ap.add_argument("--skip-stats", action="store_true")
+    ap.add_argument("--complete-only", action="store_true",
+                    help="rank only recordings that reach a settled finish "
+                         f"(>= {MIN_AFTER_STRIKE_S} s after the strike, last 0.25 s "
+                         f"<= {MAX_END_MOTION:.0%} of peak motion)")
     a = ap.parse_args()
     src = CteSource() if a.source == "cte" else H5Source(a.h5_root)
 
@@ -252,6 +271,13 @@ def main():
     if a.skip_stats:
         return
 
+    name = "ranking.csv"
+    if a.complete_only:
+        ok = (sw.rec_after_strike_s >= MIN_AFTER_STRIKE_S) & (sw.rec_end_motion_frac <= MAX_END_MOTION)
+        kept = ok.groupby(sw.participant.map(GROUP)).agg(["sum", "count"])
+        print("complete recordings kept:", kept.to_dict("index"))
+        sw, name = sw[ok], "ranking_complete.csv"
+    sw = sw.drop(columns=[c for c in sw.columns if c.startswith("rec_")])
     per = sw.groupby("participant").median(numeric_only=True)
     nsw = sw.groupby("participant").count()
     per = per.where(nsw >= 5)  # a participant needs >= 5 swings with the feature
@@ -280,7 +306,7 @@ def main():
     r["abs_g"] = r.hedges_g.abs()
     r = r.sort_values("abs_g", ascending=False).reset_index(drop=True)
     r.index += 1
-    r.to_csv(os.path.join(a.out, "ranking.csv"), index_label="rank")
+    r.to_csv(os.path.join(a.out, name), index_label="rank")
     with pd.option_context("display.width", 200, "display.max_columns", 20):
         print(r.head(25).round(3).to_string())
 

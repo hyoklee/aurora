@@ -148,6 +148,45 @@ Reading:
   3.40 s). So many beginner recordings probably stop before the finish, and this
   feature mixes finish posture with the recording window.
 
+### Ranking without cut-short recordings (added 2026-11-27)
+
+`golf_truth.py --complete-only` writes `results/ranking_complete.csv`, ranked only on
+recordings that reach a settled finish:
+* **Rule:** the recording runs at least 1.0 s after the strike (peak trail-hand
+  acceleration), and the body has settled by the end (mean joint speed over the last
+  0.25 s at most 10 % of the swing's peak).
+* **Same rule for every group:** filtering only beginners would bias the comparison.
+
+It keeps 201/401 beginner, 215/323 intermediate and 651/833 pro swings:
+* **Five golfers lose (almost) everything.** P01, P07 and P08 (beginners), P10
+  (intermediate) and P18 (pro) keep fewer than 5 swings each. Their recordings stop
+  0.6–0.8 s after the strike with the body still moving: P18's head is still rising at
+  15 cm/s.
+* **What is left:** 5 beginners (P02–P06) against 7 pros (P17, P19–P24).
+* **Two changes are mixed together:** cut-short swings are gone, and so are those five
+  golfers.
+
+| complete-only # | all swings # | feature | g, all | g, complete | AUC | p | p, adj. height |
+|---|---|---|---|---|---|---|---|
+| 1 | 1 | peak acceleration, trail forearm | +2.20 | +2.45 | 1.00 | 0.003 | 0.020 |
+| 2 | 2 | peak acceleration, trail hand | +1.81 | +1.56 | 0.91 | 0.018 | 0.17 |
+| 3 | 8 | peak acceleration, lead hand | +1.40 | +1.50 | 0.89 | 0.030 | 0.22 |
+| 4 | 6 | rotation range, trail hip | +1.41 | +1.34 | 0.89 | 0.030 | 0.019 |
+| 5 | 16 | rotation range, lead wrist | −1.08 | −1.23 | 0.14 | 0.048 | 0.043 |
+| 6 | 3 | head range, up | +1.61 | +1.22 | 0.83 | 0.073 | 0.21 |
+| 12 | 22 | rotation range, pelvis | +0.99 | +1.10 | 0.80 | 0.11 | 0.008 |
+| 14 | 4 | peak acceleration, head | +1.42 | +1.07 | 0.71 | 0.27 | 0.053 |
+
+Reading:
+* **Robust:** trail-forearm acceleration, trail-hip and pelvis rotation, and a quieter
+  lead wrist keep their effect, and still separate the groups after adjusting for height.
+  Trail-forearm acceleration separates the 12 golfers perfectly (AUC 1.00).
+* **Weakened:** head range up (g 1.61 → 1.22, p 0.073), so part of it was the recording
+  window. Peak head and neck acceleration also drop (#4 → #14). Those effects leaned on
+  the excluded beginners.
+* **Smaller sample:** 12 golfers instead of 16, so the best BH q is 0.235 (0.058 with
+  all swings). The ranking is more descriptive still.
+
 ## 3. With vs without clio-core
 
 | step | without clio-core | with clio-core CAE |
@@ -219,7 +258,7 @@ CTE. None of the three ALCF models finished the analysis:
 * clio-core: `context-assimilation-engine/core/{include/clio_cae/core/factory/dataverse*.h, src/factory/dataverse_*.cc, src/factory/tools/dataverse_tool_main.cc}`, `test/unit/dataverse/`
 * `bench/golf/golf_omni.yaml`: the OMNI file. `clio_golf.yaml` is the runtime config (port 9513). `clio_env.sh.example` sets the environment.
 * `bench/golf/cte_golf.py`: reads tags back as numpy arrays and CSVs.
-* `bench/golf/golf_truth.py`: ground truth and timing (`--source cte|h5`). `results/` holds the ranking, timings and per-swing features. Since 2026-11-27, `ranking.csv` comes from `--source h5` and includes the facing-frame features. `swing_features_cte.csv` is the original CTE run, without them. Its 85 shared features give the same g to the last digit. Rerun `--source h5` (output git-ignored) or `--source cte` for the new per-swing columns.
+* `bench/golf/golf_truth.py`: ground truth and timing (`--source cte|h5`). `results/` holds the ranking, timings and per-swing features. Since 2026-11-27, `ranking.csv` comes from `--source h5` and includes the facing-frame features. `swing_features_cte.csv` is the original CTE run, without them. Its 85 shared features give the same g to the last digit. Rerun `--source h5` (output git-ignored) or `--source cte` for the new per-swing columns. `ranking_complete.csv` comes from `--complete-only`.
 * `bench/golf/run_agent_golf.sh`, `prompt.txt`, `runs/`: the agent runs, cold staging log and clio-cae log.
 
 [1] MultiSenseGolf, Scientific Data (2026), https://doi.org/10.1038/s41597-026-08648-4 ; data: https://doi.org/10.7910/DVN/LCCLLW (CC0)
