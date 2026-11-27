@@ -13,8 +13,17 @@ export CLIO_PREFIX=${CLIO_DEV_PREFIX:-$HOME/.local/share/clio-dev}
 export CLIO_AGENT_HOME=${QICK_AGENT_HOME:?set QICK_AGENT_HOME (scratch; each home holds a 1.1 GB store)}/qick_$tag
 V=$CLIO_PREFIX/clio-agent/.venv
 w=$QICK_RUN_ROOT/$tag
-[ -e "$w" ] && mv "$w" "$w.old.$(date +%s)"
-[ -e "$CLIO_AGENT_HOME" ] && mv "$CLIO_AGENT_HOME" "$CLIO_AGENT_HOME.old.$(date +%s)"
+# Earlier runs and homes go to an archive outside the run root. A locked (000)
+# sibling is not enough: on 2026-11-27 beam listed the run root, found its own
+# earlier try (left there as $w.old.*) and ran `chmod -R +rx` on it.
+A=${QICK_ARCHIVE:-$QICK_SCRATCH/qick_archive}/$(date +%Y%m%d_%H%M%S)
+for d in "$QICK_RUN_ROOT" "$QICK_AGENT_HOME"; do
+  [ -d "$d" ] || continue
+  for e in "$d"/* "$d"/.[!.]*; do
+    [ -e "$e" ] || continue
+    mkdir -p "$A/$(basename "$d")"; mv "$e" "$A/$(basename "$d")/"
+  done
+done
 # The venv cannot be locked, because the prompt points the agent at its python.
 # It must hold no earlier agent's scripts: a 2026-11-21 run left its analysis there,
 # and on 2026-11-26 beam found it and re-ran it.
@@ -23,6 +32,8 @@ stray=$(find "$QICK_SCRATCH/venv" -maxdepth 1 -type f ! -name pyvenv.cfg ! -name
 mkdir -p "$w" "$CLIO_AGENT_HOME"
 cp "$repo/data/qick/2025-10-19_12-46-02_ss_ge_results_batch_1_Num_per_batch1.h5" "$w/ss_ge.h5"
 cp "$here/fermilab-pub-26-0193.txt" "$w/"
+hook=$CLIO_AGENT_HOME/deliverables_stop_hook.py
+cp "$here/../icecube7/deliverables_stop_hook.py" "$hook"
 # Lock everything that could show the agent an answer while it works:
 # - the repo's ground truth, write-ups and earlier answers;
 # - older CLIO homes, which hold earlier QICK sessions;
@@ -35,7 +46,7 @@ for p in "$repo"/src/qick "$repo"/doc "$repo"/CLAUDE.md "$repo"/bench/icecube7 \
          "$HOME"/.local/share/clio/gact "$CLIO_PREFIX"/home* \
          "$QICK_SCRATCH"/* "$QICK_RUN_ROOT"/*/ "$QICK_AGENT_HOME"/*/ $QICK_LOCK; do
   p=${p%/}
-  case $p in "$w"|"$CLIO_AGENT_HOME"|"$QICK_SCRATCH/venv"|"$QICK_RUN_ROOT"|"$QICK_AGENT_HOME"|"$QICK_SCRATCH/hooks") continue;; esac
+  case $p in "$w"|"$CLIO_AGENT_HOME"|"$QICK_SCRATCH/venv"|"$QICK_RUN_ROOT"|"$QICK_AGENT_HOME") continue;; esac
   [ -e "$p" ] && [ "$(stat -c %a "$p")" != 0 ] || continue
   locked+=("$p:$(stat -c %a "$p")"); chmod 000 "$p"
 done
@@ -53,15 +64,14 @@ trap unlock EXIT
   # beam is text-only on ALCF. One view_image led to HTTP 400 "not a multimodal model",
   # returned as the answer (2026-11-26). Needs clio-agent 5624f32e3.
   case $m in beam*) export CLIO_LM_ACCEPTS_IMAGES=${CLIO_LM_ACCEPTS_IMAGES:-false};; esac
-  # The Stop hook re-drives a turn (at most 3 times) while readout.png is missing.
-  # The hook script lives under bench/icecube7, which is locked during the run,
-  # so this copies it into $QICK_SCRATCH/hooks first.
+  # The Stop hook re-drives a turn (at most 3 times) while readout.png is missing
+  # or the final message has no report (no "VERDICT").
+  # The hook script was copied into the agent home before bench/icecube7 was locked.
   if [ "${QICK_STOP_HOOK:-1}" = 1 ]; then
-    hook=$CLIO_AGENT_HOME/deliverables_stop_hook.py
-    cp "$QICK_SCRATCH/hooks/deliverables_stop_hook.py" "$hook"
     cat > "$CLIO_AGENT_HOME/qick_hooks.json" <<EOF
 {"hooks": [{"id": "qick-deliverables", "on": ["Stop"],
-  "run": {"type": "command", "command": "/usr/bin/python3", "args": ["$hook", "$w", "readout.png"]},
+  "run": {"type": "command", "command": "/usr/bin/python3",
+          "args": ["$hook", "$w", "readout.png", "--answer-contains", "VERDICT"]},
   "timeoutMs": 10000, "loopLimit": 3}]}
 EOF
     export CLIO_HOOKS_CONFIG=$CLIO_AGENT_HOME/qick_hooks.json
