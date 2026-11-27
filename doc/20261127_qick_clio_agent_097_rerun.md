@@ -1,4 +1,4 @@
-# QICK readout question: CLIO Agent reruns for the ALCF models that gave no answer (2026-11-26/27)
+# QICK readout question: CLIO Agent reruns of all four ALCF models on the fixed clio-agent (2026-11-26/27)
 
 Follow-up to `doc/20261121_qick_reproducibility_alcf_agents.md`. On CLIO Agent 0.9.4,
 two models gave no answer:
@@ -11,15 +11,32 @@ the same prompt and the same workspace contents (`ss_ge.h5` and the paper text).
   upstream as iowarp/clio-agent#2402;
 - the IceCube-7 harness approach (`bench/qick/run_agent_097.sh`).
 
-The CLIO Agent mistral and nemotron runs, and every Genesis run, were not repeated.
-That includes Genesis + mistral (HTTP 400 on images), which runs on Claude Code, not CLIO.
+Mistral and nemotron, which answered on 0.9.4, were rerun afterwards (2026-11-27) with the
+same harness, so all four models are compared on the same clio-agent. No Genesis run was
+repeated; that includes Genesis + mistral (HTTP 400 on images), which runs on Claude Code,
+not CLIO.
 
 ## Result
 
 | model | 0.9.4 (2026-11-21) | 0.9.7.1 + fixes (this rerun) |
 |---|---|---|
 | **muse-spark-bf16** | 0 (3/3 tries failed at step 1) | **5/6**, first try, 465 s, 20 tool calls, 1.02 M tokens |
+| **mistral-large-4** | 4.5, 611 s | **4/6**, first try, 346 s, 19 tool calls, 0.62 M tokens |
+| **nemotron-35-super-vl** | 3.5, 57 s | **3.5/6**, first try, 207 s, 11 tool calls, 3.18 M tokens |
 | **beam-1.0-fp8** | 6/6 on try 2 (try 1 failed at step 1) | **no valid answer**: 2 clean tries both ended without `readout.png` or a report; 2 more tries excluded as contaminated |
+
+Per-item scores (rubric of the 2026-11-21 doc):
+
+| model | V | Q | F | S | N | P | score |
+|---|---|---|---|---|---|---|---|
+| muse-spark-bf16 | ✓ PARTIAL | ✓ | 91.82 | ✗ "stale threshold" | ✓ 4.76 | ✓ | **5** |
+| mistral-large-4 | ✓ YES | ✓ | 91.82 | ✗ "fixed calibration threshold" | ✗ 7.9 / 5.3 | ✓ | **4** |
+| nemotron-35-super-vl | ✓ YES | ✓ | 91.60 | ✗ "different, unspecified analysis" | ✗ 7.62 | ½ | **3.5** |
+| beam-1.0-fp8 | — | — | — | — | — | — | **0** |
+
+**Total on the fixed clio-agent: 12.5 / 24**, against 14 / 24 on 0.9.4. Muse gained 5 and
+beam lost 6; mistral and nemotron scored about the same as before, but now finished on the
+first try. No model explained the stored 0.8365 as the contrast 2F−1 this time.
 
 ### muse-spark-bf16: answered on the first try (`runs097/ok_muse-spark-bf16/`)
 
@@ -47,6 +64,33 @@ Rubric of the 2026-11-21 doc:
   but untidy.
 
 On 2026-11-21 this would have been the second-best CLIO Agent answer, after beam's 6/6.
+
+### mistral-large-4: answered on the first try (`runs097/ok_mistral-large-4/`)
+
+- **F:** 91.82 ± 0.35 % at threshold −155.4 with the stored angle; Q1 found by checking all
+  six qubits (Q4 dead at 51.5 %).
+- **S:** wrong. It noticed the stored values are integer counts over 6000 and called them a
+  fixed-threshold assignment with the calibration threshold. On 0.9.4 it got this right.
+- **N:** wrong, as in every earlier mistral run: SNR 7.9 from the clean-side sample standard
+  deviation (σ 21.9/23.7, no half-normal correction), or 5.3 from a Gaussian core fit.
+- **P:** correct. Rotated I–Q scatter with medians, projected histograms with core fits and the
+  optimal threshold. It viewed the plot twice and fixed it once (`fix_plot.py`).
+- Clean: 346 s, no gateway stream cuts this time.
+
+### nemotron-35-super-vl: answered on the first try (`runs097/ok_nemotron-35-super-vl/`)
+
+- **F:** 91.60 ± 0.4 %. It rotated with the wrong sign: its Δµ is 173.5 rather than 180.3, and
+  the clusters in its scatter still differ in Q by about 40. Inside the paper's ± 0.4 %, so F is
+  scored right; the same 91.6 % appeared in its 0.9.4 run.
+- **S:** wrong: "a different, unspecified analysis".
+- **N:** wrong: 7.62, the uncorrected clean-side standard deviation. It concluded the file "may
+  not be the exact Fig. 14 dataset".
+- **P:** ½. The scatter and histograms are right, but the "core fit" curves are half-Gaussians
+  drawn only on the clean side, with peaks about twice the histogram height.
+- **Other qubits:** wrong for several (Q3 "degenerate", Q5 73.9 %, Q6 63.6 %; mistral
+  gets 87.2, 87.5 and 82.9 %), consistent with the bad rotation.
+- Fastest again (207 s, 11 calls), using `run_code` rather than shell scripts. The image cap of
+  1 held: it viewed one image and got no 400.
 
 ### beam-1.0-fp8: four tries, no valid answer
 
@@ -119,7 +163,8 @@ New after this rerun's leaks:
   the run root after each run.
 
 Validity check for every scored run: its semantic trace lists every tool call (copied as
-`tool_calls.txt`). Muse's calls touch only its workspace and the venv's `python`.
+`tool_calls.txt`). The muse, mistral and nemotron calls touch only their own workspace and the
+venv's `python`.
 
 **Lesson:** a lock list is never complete while a shell-capable agent runs as the user who
 holds the answers. Beam searched `/`, `/tmp`, the scratch tree and the repo, and tried
@@ -131,6 +176,6 @@ holds the answers. Beam searched `/`, `/tmp`, the scratch tree and the repo, and
 
 - `bench/qick/run_agent_097.sh`
 - `bench/icecube7/deliverables_stop_hook.py` (now takes the file list as arguments)
-- `bench/qick/runs097/`: one directory per try, each with `out.json`, `meta.json`,
+- `bench/qick/runs097/`: one directory per try (`ok_mistral-large-4/` and `ok_nemotron-35-super-vl/` added 2026-11-27), each with `out.json`, `meta.json`,
   `tool_calls.txt`, plots and `tmp_leftovers/`; the inputs are not committed
 - clio-agent: iowarp/clio-agent#2402, now 8 commits including 5624f32e3

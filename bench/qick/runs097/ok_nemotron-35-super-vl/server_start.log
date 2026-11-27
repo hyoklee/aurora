@@ -1,0 +1,9 @@
+[0;32m==>[0m Starting CLIO server on :17800 (log: /tmp/claude-36126/-home-hyoklee-aurora/7e1b65af-7054-4a75-8def-00dce7042087/scratchpad/agent_homes/qick_agent097_nemotron-35-super-vl/state/clio-server.aurora-uan-0012.log)
+[0;32m==>[0m   healthy (pid 1184204)
+[0;31m!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!![0m
+[0;31m!!  SECURITY WARNING: protected execution (OS sandbox) is OFF[0m
+[0;31m!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!![0m
+  Protected execution is off. Agent tools and the commands they run are not confined by an OS sandbox, so they can change any file your user account can. CLIO still checks file-tool paths and records writes outside your workspace, but it does not prevent them.
+  reason: codex_linux_fence_unavailable
+  next:   Codex is installed, but its bubblewrap fence cannot start a child here (codex exited 1: bwrap: Creating new namespace failed: nesting depth or /proc/sys/user/max_*_namespaces exceeded (ENOSPC)). Allow unprivileged user namespaces (`sysctl kernel.unprivileged_userns_clone=1`; on Ubuntu 23.10+ `sysctl kernel.apparmor_restrict_unprivileged_userns=0`; in a container, a seccomp profile that permits them), or use a Landlock-capable kernel (>=5.13), then restart CLIO.
+[0;33m!![0m not an interactive terminal: continuing without protected execution
