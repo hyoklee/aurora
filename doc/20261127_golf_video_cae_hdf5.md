@@ -23,6 +23,14 @@ files which separate beginners from professionals. Data: MultiSenseGolf [2]
 * A pretrained video-action network does not beat a single still frame
   (golfer-level AUC 0.72 against 0.70, neither significant). Its separation, such
   as it is, comes from scene and appearance, not the swing.
+* On a compute node, one Intel GPU Max 1550 tile runs the networks 3.1× faster
+  than the node's CPU (16 frames at 112²). With 32 frames at 224² it is 3.9×
+  faster, and the whole run 1.9× faster. Optical flow is faster on the CPU than
+  through OpenCL, and the classifiers stay on the CPU. Ingest takes 115 s,
+  against 140 s on the login node (§5).
+* Re-ingesting gives slightly different HDF5 pixels (x264, about 1.2 grey
+  levels). Head-camera features hold across three ingests; the embedding AUC
+  moves between 0.69 and 0.80 (§5).
 
 ## 1. CAE: video → HDF5 in OMNI
 
@@ -141,9 +149,9 @@ Ranking statistics follow the sensor study:
 * Hedges g, Mann–Whitney p and AUC;
 * Benjamini–Hochberg q over all 12 video features together.
 
-Run time: features 24 s with 8 processes, embeddings 31 s on CPU, 234 s in all
-including the clio-core reads and the permutations. It ran on the login node
-with CPU-only PyTorch. At this size a GPU would not change much.
+Run time on the login node (CPU only): features 25 s with 8 processes,
+embeddings 20 s, classifier permutations 169 s, 215 s in all. §5 has the
+compute-node and GPU timings.
 
 ## 3. Results
 
@@ -185,12 +193,15 @@ What the features show:
   To reproduce, take per-golfer medians of `video_swing_features.csv` (view
   `fpv`) against `swing_features_cte.csv` column `head_peak_gyro`. The camera is
   an independent measurement of the same motion.
-* **Classifiers.**
+* **Classifiers** (login-node ingest).
 
   | input | golfer AUC | permutation p |
   |---|---|---|
   | R(2+1)D video embedding | 0.719 | 0.064 |
   | ResNet-18 first-frame still | 0.703 | 0.082 |
+
+  Across three separate ingests (§5), the video AUC ranges from 0.69 to 0.80,
+  and the still-frame AUC from 0.66 to 0.70. Only one ingest reached p < 0.05.
 
   The still frame does as well as the video. The golfers both models score as
   most "pro-like" are the same visually distinctive ones: P03 (a beginner)
@@ -212,12 +223,129 @@ What the features show:
 * **Scene confound.** Framing and lighting differ slightly per golfer (P20 is
   shifted; P19 and P22 are darker). Motion features are only weakly affected; the
   learned embeddings are strongly affected, as the still-frame control shows.
+* **Ingest is not bit-reproducible.** Re-ingesting the same MP4s gives slightly
+  different HDF5 pixels: x264 at crf 23, about 1.2 grey levels apart. This
+  moves the fragile results (phase timing, learned embeddings) but not the
+  head-camera features. See §5.
 * **Run gotcha.** A clio-core client forked after it connects hangs on the
   runtime's shared memory: the first run's 16 workers waited 64 minutes. The
   script now reads all HDF5 bytes in the parent process and hands bytes to the
   workers.
 
-## 5. Reproduce
+## 5. Compute node with GPUs: performance (2026-11-27)
+
+Two PBS jobs ran `pbs/golf_video_gpu.pbs` on one Aurora compute node each
+(debug queue, IOWarp allocation): 9136201 and 9136314. Each node has 2 Xeon Max
+9470C (208 threads) and 6 Intel Data Center GPU Max 1550. Each job:
+1. starts its own clio-core runtime (the video build);
+2. ingests `golf_video_omni.yaml` from Dataverse through the ALCF proxy;
+3. runs `golf_video_ml.py --source cte` several ways.
+
+The login node is aurora-uan-0012, shared, 104 threads, no GPU. All timings are
+in `bench/golf/results/video_perf.csv`.
+
+**GPU code.** `golf_video_ml.py` has two GPU options:
+* `--device xpu`: PyTorch 2.15 XPU wheels run both networks in batches of 16 on
+  one GPU tile.
+* `--flow ocl`: OpenCV runs Farnebäck optical flow through OpenCL. Workers are
+  spawned, not forked, and spread over the 6 GPUs.
+
+**Setup.** The XPU wheels ship a newer SYCL/UR runtime than `/opt/aurora`'s
+oneAPI. Python needs the venv's `lib/` first on `LD_LIBRARY_PATH`; otherwise
+`import torch` fails with `undefined symbol: urGraphGetIdExp`.
+
+### Ingest
+
+| | login node | compute node (2 jobs) |
+|---|---|---|
+| ingest (Dataverse → HDF5 → clio-core, 686 objects) | 140 s | 115.5 s, 115.0 s |
+| of which staging (1.52 GB, 1,454 requests) | 40 s | 39 s |
+
+The transcode is CPU work in the runtime, and the compute node's CPU makes it
+about 25 s faster. The GPUs are not used for ingest.
+
+### Analysis stages (seconds)
+
+| stage | login CPU | compute CPU | compute GPU | GPU speed-up |
+|---|---|---|---|---|
+| read 343 videos from clio-core | 0.08 | 0.10 | 0.10 | n/a |
+| optical flow, 8 workers | 24.8 | 16.1–16.6 | OpenCL: 20.3 | **0.8×** (slower) |
+| optical flow, 32 workers | n/a | 10.1–10.8 | n/a | n/a |
+| R(2+1)D + ResNet-18 model, 16 frames at 112² | 9.8 | 6.97–7.10 | 2.29 | **3.1×** |
+| same, 32 frames at 224² | 128.0 | 62.4–62.5 | 15.8 | **3.9×** |
+| classifiers, 100 permutations | 18.5 | 13.4–13.8 | same (CPU) | n/a |
+| **total, standard workload** (100 perms) | ≈ 65 | 43.7 (32 workers) | 45.2 (8 workers) | ≈ 1.0× |
+| **total, heavy workload** | 195 (8 workers) | 104.6–105.3 | 55.1–55.9 | **1.9×** |
+
+The two jobs' timings agree to within a few percent.
+
+* **The GPU speeds up only the neural-network step: 3–4× on one of 12 tiles.**
+  With the standard 16 × 112² clips that step is 7 s of the run, so the whole
+  analysis barely changes (45 s against 44 s with 32 CPU workers). With
+  32 × 224² clips the model step goes from 62 s to 16 s, and the run from 105 s
+  to 55 s.
+* **Optical flow is faster on the CPU.** At 160 px a frame pair is too small for
+  the GPU to win over transfer and kernel launch. The OpenCL run also pays to
+  spawn its workers. Its features are identical to the CPU flow's.
+* **The rest of the run is CPU-bound.** The 1000-permutation classifier test
+  (130–169 s) is scikit-learn on the CPU. More CPU workers help the flow
+  (16 → 10 s with 8 → 32 workers).
+* **Compute node against login node, CPU only:** 1.3–2× faster per stage. The
+  login node was also shared, with a load average around 90.
+* **Not used:** 11 of the 12 GPU tiles. Splitting the clips over tiles, or
+  porting flow and classifiers to the GPU, would only pay at a much larger
+  scale: thousands of swings, or full-resolution, full-length clips.
+
+**Failures found and fixed.**
+* `--flow ocl` with forked workers failed with `CL_OUT_OF_RESOURCES`, because an
+  OpenCL context does not survive a fork. The workers are now spawned, and none
+  of them opens OpenCL before it starts.
+* 32 spawned workers each started 64 OpenBLAS threads and hit `pthread_create`
+  EAGAIN. Workers now set `OPENBLAS_NUM_THREADS=1`. The 32-worker OpenCL run
+  was not repeated after this fix.
+
+### Reproducibility across ingests
+
+The three ingests (login, job 1, job 2) gave different AUCs. Two checks show why.
+
+* **The analysis is reproducible.** Job 2 also analysed the login node's own HDF5
+  files on the compute node. It got exactly the login node's AUCs (0.719 and
+  0.703). On a given ingest, the CPU and GPU runs also agree exactly.
+* **The ingest is not bit-reproducible.** Job 2's HDF5 videos against the login
+  node's:
+  * 1 of 343 videos is identical;
+  * the median mean difference is 1.23 grey levels (max 1.89);
+  * PSNR between the two copies is 41 dB (min 38.7).
+
+  The source MP4s, settings, libraries and filter parameters are identical.
+
+  On the login node, `cae_video_hdf5` reproduces its own output bit for bit,
+  even six at a time. Its output depends on x264's thread count (1 CPU differs
+  from 4 or more), and it does not match the runtime's copy. The exact source
+  of the variation inside the runtime is not pinned down. Making it
+  reproducible would mean fixing the encoder's thread count in the filter, or
+  storing lossless (crf 0).
+
+How much that moves the results:
+
+| | login ingest | job 1 ingest | job 2 ingest |
+|---|---|---|---|
+| video AUC, 16×112² | 0.719 | 0.734 | 0.719 |
+| video AUC, 32×224² | 0.703 | **0.797** (p 0.03) | 0.688 |
+| still AUC | 0.703 | 0.672 | 0.656 |
+| g fpv_peak_shift_per_s | 1.35 | 1.41 | 1.32 |
+| g fpv_peak_roll_deg_s | 1.28 | 1.26 | 1.35 |
+| g vid_downswing_s | −1.25 | −1.22 | −0.86 |
+| g vid_tempo_ratio | 1.17 | 1.15 | 0.86 |
+
+* **Head-camera features are robust.** They keep g 1.26–1.41 and p ≤ 0.06 in
+  every ingest.
+* **Phase timings are sensitive.** Downswing and tempo depend on which frame the
+  motion minimum lands on.
+* **Learned embeddings are fragile.** Job 1's heavy-workload AUC of 0.797
+  (p = 0.03) did not repeat, and is noise from the encode.
+
+## 6. Reproduce
 
 ```bash
 # FFmpeg with libx264 + the plugin
@@ -233,6 +361,8 @@ source clio_video_env.sh            # also sets HDF5_PLUGIN_PATH for the runtime
 clio_run start &                     # golf runtime (clio_golf.yaml, port 9513)
 clio-cae bench/golf/golf_video_omni.yaml
 python bench/golf/golf_video_ml.py --source cte --out results --workers 8
+# on a compute node, CPU vs GPU (stages everything under /lus/flare/projects/IOWarp):
+qsub [-v GOLF_RUNS="cpu_w8 xpu_w8",GOLF_LOGIN_H5=<dir of .mp4.hdf5>] pbs/golf_video_gpu.pbs
 # python env: h5ffmpeg av opencv-python-headless scikit-learn torch torchvision
 ```
 

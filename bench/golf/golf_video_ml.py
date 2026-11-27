@@ -19,15 +19,24 @@ golfer level (mean probability over that golfer's swings) with a label-permutati
 p-value.
 
 usage: python golf_video_ml.py --source cte|dir [--root DIR] [--out DIR]
+         [--device cpu|xpu|cuda|auto] [--flow cpu|ocl] [--clip-frames N] [--clip-size N]
   cte: needs clio_env.sh (runtime up, golf_video_omni.yaml ingested)
   dir: reads <root>/**/*.mp4.hdf5 (the CAE staging cache)
+  --device: where the embedding networks run (auto: xpu, then cuda, then cpu)
+  --flow ocl: Farneback optical flow through OpenCV's OpenCL path (a GPU if the
+    OpenCL runtime has one); cpu is the default. Workers are spawned, not forked
+    (an OpenCL context does not survive a fork), and worker i uses OpenCL GPU
+    i mod --ocl-gpus.
+Per-stage wall times go to video_ml.json under "timing".
 """
 import argparse
 import io
 import json
 import os
 import re
+import socket
 import time
+import multiprocessing as mp
 from concurrent.futures import ProcessPoolExecutor
 
 import cv2
@@ -40,6 +49,23 @@ from scipy import stats
 GROUP = {**{f"P{i:02d}": "Beginner" for i in range(1, 9)},
          **{f"P{i:02d}": "Professional" for i in range(17, 25)}}
 FLOW_W = 160  # optical flow at 160 px wide (half the stored width)
+FLOW_OCL = False  # set in each worker by ocl_worker_init()
+
+
+def ocl_worker_init(counter, n_gpus):
+    """Pool initializer for --flow ocl: pick this worker's GPU, then open OpenCL."""
+    global FLOW_OCL
+    with counter.get_lock():
+        i = counter.value
+        counter.value += 1
+    os.environ["OPENCV_OPENCL_DEVICE"] = f":GPU:{i % n_gpus}"
+    cv2.ocl.setUseOpenCL(True)
+    FLOW_OCL = cv2.ocl.haveOpenCL() and cv2.ocl.useOpenCL()
+
+
+def ocl_device(_):
+    dev = cv2.ocl.Device.getDefault().name()
+    return f"{os.getpid()} {dev} {os.environ['OPENCV_OPENCL_DEVICE']}"
 
 
 # ---------------------------------------------------------------- sources
@@ -85,8 +111,12 @@ def flow_series(frames):
     h = int(frames.shape[1] * FLOW_W / frames.shape[2])
     small = [cv2.resize(f, (FLOW_W, h), interpolation=cv2.INTER_AREA) for f in frames]
     e, area = [], []
+    if FLOW_OCL:
+        small = [cv2.UMat(f) for f in small]
     for a, b in zip(small[:-1], small[1:]):
         fl = cv2.calcOpticalFlowFarneback(a, b, None, 0.5, 3, 15, 3, 5, 1.2, 0)
+        if FLOW_OCL:
+            fl = fl.get()
         mag = np.linalg.norm(fl, axis=2)
         moving = mag > 1.0
         e.append(mag[moving].sum() / mag.size)
@@ -163,38 +193,84 @@ def one_swing(args):
 
 
 # ---------------------------------------------------------------- 3, 4. embeddings
-def embed(rows, source):
-    """R(2+1)D-18 clip embedding and ResNet-18 first-frame embedding per front swing."""
+def pick_device(name):
+    import torch
+    if name == "auto":
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            return "xpu"
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    return name
+
+
+def sync(dev):
+    import torch
+    if dev == "xpu":
+        torch.xpu.synchronize()
+    elif dev == "cuda":
+        torch.cuda.synchronize()
+
+
+def embed(rows, source, dev, n_frames=16, size=112, batch=16):
+    """R(2+1)D-18 clip embedding and ResNet-18 first-frame embedding per front swing.
+
+    Returns (embeddings, timing): clips are decoded and resized on the CPU
+    ("prep"), then run through both networks on `dev` in batches ("model",
+    after one warm-up batch that is timed apart as "warmup").
+    """
     import torch
     import torchvision.models as tvm
     import torchvision.models.video as tvv
 
     torch.set_num_threads(min(32, os.cpu_count()))
-    vw = tvv.R2Plus1D_18_Weights.KINETICS400_V1
-    vid = tvv.r2plus1d_18(weights=vw).eval()
+    tm = {}
+    t = time.perf_counter()
+    vid = tvv.r2plus1d_18(weights=tvv.R2Plus1D_18_Weights.KINETICS400_V1).eval()
     vid.fc = torch.nn.Identity()
-    iw = tvm.ResNet18_Weights.IMAGENET1K_V1
-    img = tvm.resnet18(weights=iw).eval()
+    img = tvm.resnet18(weights=tvm.ResNet18_Weights.IMAGENET1K_V1).eval()
     img.fc = torch.nn.Identity()
-    v_mean = torch.tensor([0.43216, 0.394666, 0.37645]).view(3, 1, 1, 1)
-    v_std = torch.tensor([0.22803, 0.22145, 0.216989]).view(3, 1, 1, 1)
-    i_mean = torch.tensor([0.485, 0.456, 0.406]).view(3, 1, 1)
-    i_std = torch.tensor([0.229, 0.224, 0.225]).view(3, 1, 1)
-    out = []
+    vid, img = vid.to(dev), img.to(dev)
+    tm["load"] = time.perf_counter() - t
+
+    t = time.perf_counter()
+    clips, stills = [], []
+    for p, swing, view, handle in rows:
+        frames, _, _ = open_video(source, handle)
+        idx = np.linspace(0, len(frames) - 1, n_frames).round().astype(int)
+        clips.append(np.stack([cv2.resize(frames[i], (size, size),
+                                          interpolation=cv2.INTER_AREA) for i in idx]))
+        stills.append(cv2.resize(frames[0], (224, 224), interpolation=cv2.INTER_AREA))
+    clips = torch.from_numpy(np.stack(clips))   # [N, T, S, S] uint8
+    stills = torch.from_numpy(np.stack(stills))  # [N, 224, 224] uint8
+    tm["prep"] = time.perf_counter() - t
+
+    v_mean = torch.tensor([0.43216, 0.394666, 0.37645], device=dev).view(1, 3, 1, 1, 1)
+    v_std = torch.tensor([0.22803, 0.22145, 0.216989], device=dev).view(1, 3, 1, 1, 1)
+    i_mean = torch.tensor([0.485, 0.456, 0.406], device=dev).view(1, 3, 1, 1)
+    i_std = torch.tensor([0.229, 0.224, 0.225], device=dev).view(1, 3, 1, 1)
+
+    def run(lo, hi):
+        x = clips[lo:hi].to(dev).float().div(255)[:, None].expand(-1, 3, -1, -1, -1)
+        s = stills[lo:hi].to(dev).float().div(255)[:, None].expand(-1, 3, -1, -1)
+        return (vid((x - v_mean) / v_std).cpu().numpy(),
+                img((s - i_mean) / i_std).cpu().numpy())
+
+    ev, ei = [], []
     with torch.no_grad():
-        for p, swing, view, handle in rows:
-            frames, _, _ = open_video(source, handle)
-            idx = np.linspace(0, len(frames) - 1, 16).round().astype(int)
-            clip = np.stack([cv2.resize(frames[i], (112, 112), interpolation=cv2.INTER_AREA)
-                             for i in idx]).astype(np.float32) / 255
-            x = torch.from_numpy(clip)[None].repeat(3, 1, 1, 1)  # gray -> 3 channels
-            x = ((x - v_mean) / v_std)[None]
-            ev = vid(x)[0].numpy()
-            still = cv2.resize(frames[0], (224, 224), interpolation=cv2.INTER_AREA)
-            s = torch.from_numpy(still.astype(np.float32) / 255)[None].repeat(3, 1, 1)
-            ei = img(((s - i_mean) / i_std)[None])[0].numpy()
-            out.append(dict(participant=p, swing=swing, video=ev, still=ei))
-    return out
+        t = time.perf_counter()
+        run(0, min(batch, len(rows)))  # warm-up: kernel compilation, allocator
+        sync(dev)
+        tm["warmup"] = time.perf_counter() - t
+        t = time.perf_counter()
+        for lo in range(0, len(rows), batch):
+            a, b = run(lo, lo + batch)
+            ev.append(a)
+            ei.append(b)
+        sync(dev)
+        tm["model"] = time.perf_counter() - t
+    ev, ei = np.concatenate(ev), np.concatenate(ei)
+    out = [dict(participant=r[0], swing=r[1], video=ev[i], still=ei[i])
+           for i, r in enumerate(rows)]
+    return out, {k: round(v, 2) for k, v in tm.items()}
 
 
 def logo_auc(X, golfers, y_golfer, n_perm=1000, seed=0):
@@ -274,16 +350,38 @@ def main():
     ap.add_argument("--out", default=".")
     ap.add_argument("--workers", type=int, default=32)
     ap.add_argument("--perms", type=int, default=1000)
+    ap.add_argument("--device", default="cpu", choices=["cpu", "xpu", "cuda", "auto"])
+    ap.add_argument("--flow", default="cpu", choices=["cpu", "ocl"])
+    ap.add_argument("--ocl-gpus", type=int, default=6)
+    ap.add_argument("--clip-frames", type=int, default=16)
+    ap.add_argument("--clip-size", type=int, default=112)
+    ap.add_argument("--batch", type=int, default=16)
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
+    timing = {}
+    t_all = time.perf_counter()
 
     t0 = time.perf_counter()
     vids = list_videos(a)
+    timing["read"] = time.perf_counter() - t0
     print(f"{len(vids)} videos ({sum(v[2] == 'front' for v in vids)} front, "
-          f"{sum(v[2] == 'fpv' for v in vids)} fpv)")
-    with ProcessPoolExecutor(a.workers) as ex:
+          f"{sum(v[2] == 'fpv' for v in vids)} fpv) read in {timing['read']:.1f} s")
+    t0 = time.perf_counter()
+    # One BLAS/OpenMP thread per worker: 32 spawned workers each starting 64
+    # OpenBLAS threads exhaust the job's thread limit (pthread_create EAGAIN).
+    for k in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS"):
+        os.environ.setdefault(k, "1")
+    pool = dict(max_workers=a.workers)
+    if a.flow == "ocl":  # the parent never opens OpenCL
+        pool.update(mp_context=mp.get_context("spawn"), initializer=ocl_worker_init,
+                    initargs=(mp.get_context("spawn").Value("i", 0), a.ocl_gpus))
+    with ProcessPoolExecutor(**pool) as ex:
+        if a.flow == "ocl":
+            devs = sorted(set(ex.map(ocl_device, range(a.workers * 4))))
+            print(f"OpenCL workers: {len(devs)}; e.g. {devs[:2]}")
+            timing["flow_device"] = devs[0].split(" ", 1)[1] if devs else ""
         rows = list(ex.map(one_swing, [(a.source, *v) for v in vids], chunksize=2))
-    t_feat = time.perf_counter() - t0
+    timing["features"] = time.perf_counter() - t0
     sw = pd.DataFrame(rows)
     sw.to_csv(os.path.join(a.out, "video_swing_features.csv"), index=False)
     front = sw[sw.view == "front"].drop(columns=["view", "swing"])
@@ -298,13 +396,19 @@ def main():
     with pd.option_context("display.width", 200, "display.max_columns", 20):
         print(rank.round(3).to_string())
 
+    dev = pick_device(a.device)
     t1 = time.perf_counter()
-    emb = embed([v for v in vids if v[2] == "front"], a.source)
-    t_emb = time.perf_counter() - t1
+    emb, tm = embed([v for v in vids if v[2] == "front"], a.source, dev,
+                    a.clip_frames, a.clip_size, a.batch)
+    timing["embedding"] = time.perf_counter() - t1
+    timing["embedding_stages"] = tm
+    print(f"embeddings on {dev}: {tm}")
     golfers = [e["participant"] for e in emb]
     y = {g: int(GROUP[g] == "Professional") for g in set(golfers)}
-    summary = dict(videos=len(vids), feature_seconds=round(t_feat, 1),
-                   embedding_seconds=round(t_emb, 1), classifiers={})
+    summary = dict(videos=len(vids), host=socket.gethostname(), device=dev,
+                   flow=a.flow, workers=a.workers, clip_frames=a.clip_frames,
+                   clip_size=a.clip_size, timing=timing, classifiers={})
+    t1 = time.perf_counter()
     for name in ("video", "still"):
         X = np.stack([e[name] for e in emb])
         auc, p, sc = logo_auc(X, golfers, y, n_perm=a.perms)
@@ -312,6 +416,12 @@ def main():
             golfer_auc=round(auc, 3), perm_p=round(p, 4),
             scores={g: round(float(s), 3) for g, s in sorted(sc.items())})
         print(f"{name}: leave-one-golfer-out golfer AUC {auc:.3f}, permutation p {p:.4f}")
+    timing["classifiers"] = time.perf_counter() - t1
+    timing["total"] = time.perf_counter() - t_all
+    for k, v in timing.items():
+        if isinstance(v, float):
+            timing[k] = round(v, 2)
+    print("timing (s):", timing)
     json.dump(summary, open(os.path.join(a.out, "video_ml.json"), "w"), indent=1)
 
 

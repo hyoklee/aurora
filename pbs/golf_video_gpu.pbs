@@ -1,0 +1,101 @@
+#!/bin/bash
+#PBS -N golf_video_gpu
+#PBS -l select=1
+#PBS -l walltime=01:00:00
+#PBS -l filesystems=home:flare
+#PBS -q debug
+#PBS -A IOWarp
+#PBS -o /lus/flare/projects/IOWarp/hyoklee/golfvideo_gpu/run/golf_video_gpu.out
+#PBS -e /lus/flare/projects/IOWarp/hyoklee/golfvideo_gpu/run/golf_video_gpu.err
+
+# Golf swing video (doc/20261127_golf_video_cae_hdf5.md) on an Aurora compute node:
+#   1. a private clio-core runtime (video build) and a fresh CAE ingest of
+#      bench/golf/golf_video_omni.yaml from Dataverse (MP4 -> HDF5, FFMPEG filter)
+#   2. golf_video_ml.py from clio-core, CPU vs Intel GPU (PyTorch XPU, OpenCV OpenCL)
+# Everything the node needs is staged under $GV (flare); see the doc for how.
+set -uo pipefail
+GV=/lus/flare/projects/IOWarp/hyoklee/golfvideo_gpu
+GOLF=/home/hyoklee/aurora/bench/golf
+RUN=$GV/run/${PBS_JOBID%%.*}
+LOCAL=/tmp/golfvideo_${PBS_JOBID%%.*}
+mkdir -p "$RUN" "$LOCAL"
+cd "$RUN"
+exec > >(tee -a "$RUN/job.log") 2>&1
+
+export https_proxy=http://proxy.alcf.anl.gov:3128 http_proxy=http://proxy.alcf.anl.gov:3128
+export GOLF_SCRATCH=$LOCAL CLIO_VIDEO_BUILD=$GV/clio-build-video H5FFMPEG_PLUGIN_DIR=$GV/h5plugin
+export TORCH_HOME=$GV/torch_home
+source "$GOLF/clio_video_env.sh.example"
+RT_LD=$LD_LIBRARY_PATH
+# PyTorch XPU ships a newer SYCL/UR runtime than /opt/aurora's oneAPI: put it first
+# for the Python side only (the runtime keeps the oneAPI it was built with).
+PY_LD=$GV/venv/lib:$LD_LIBRARY_PATH
+PY=$GV/venv/bin/python
+
+echo "== node $(hostname)  $(date)"
+lscpu | grep -E "Model name|^CPU\(s\)"
+LD_LIBRARY_PATH=$PY_LD $PY -c "
+import torch, cv2
+print('torch', torch.__version__, 'xpu', torch.xpu.is_available(), torch.xpu.device_count())
+if torch.xpu.is_available(): print(' ', torch.xpu.get_device_name(0))
+cv2.ocl.setUseOpenCL(True); d = cv2.ocl.Device.getDefault()
+print('opencv OpenCL device:', repr(d.name()))"
+
+echo "== runtime"
+(LD_LIBRARY_PATH=$RT_LD setsid nohup clio_run start > "$RUN/runtime.log" 2>&1 < /dev/null &)
+for i in $(seq 60); do ss -ltn | grep -q :9513 && break; sleep 1; done
+ss -ltn | grep :9513 | head -1 || { echo "runtime did not come up"; exit 1; }
+
+echo "== ingest"
+t0=$(date +%s.%N)
+LD_LIBRARY_PATH=$RT_LD clio-cae "$GOLF/golf_video_omni.yaml" > "$RUN/omni.log" 2>&1
+t1=$(date +%s.%N)
+for i in $(seq 900); do
+  grep -q "ingested .* objects under 'golfvideo'" "$RUN/runtime.log" && break; sleep 1
+done
+t2=$(date +%s.%N)
+grep -E "ingested .* objects|staged|requests" "$RUN/runtime.log" | sed 's/\x1b\[[0-9;]*m//g' | tail -3
+awk -v a="$t0" -v b="$t1" -v c="$t2" \
+  'BEGIN { printf "ingest: clio-cae returned %.1f s, all objects landed %.1f s\n", b - a, c - a }'
+
+ml() {  # name, args...
+  local name=$1; shift
+  echo "== ml $name: $*"
+  LD_LIBRARY_PATH=$PY_LD $PY "$GOLF/golf_video_ml.py" --source cte --out "$RUN/$name" "$@" \
+    > "$RUN/$name.log" 2>&1
+  echo "rc=$?"
+  grep -E "OpenCL|read in|embeddings on|AUC|timing" "$RUN/$name.log" | grep -v '%'
+}
+# Same settings as the login-node run, then the GPU variants, then a heavier
+# embedding workload (32 frames at 224^2 instead of 16 at 112^2).
+# GOLF_RUNS (qsub -v GOLF_RUNS="a b") picks a subset of these.
+declare -A RUNS=(
+  [cpu_w8]="--device cpu --flow cpu --workers 8 --perms 1000"
+  [xpu_w8]="--device xpu --flow cpu --workers 8 --perms 100"
+  [xpu_ocl_w8]="--device xpu --flow ocl --workers 8 --perms 100"
+  [xpu_ocl_w32]="--device xpu --flow ocl --workers 32 --perms 100"
+  [cpu_w32]="--device cpu --flow cpu --workers 32 --perms 100"
+  [cpu_heavy]="--device cpu --flow cpu --workers 32 --perms 100 --clip-frames 32 --clip-size 224"
+  [xpu_heavy]="--device xpu --flow cpu --workers 32 --perms 100 --clip-frames 32 --clip-size 224"
+)
+for name in ${GOLF_RUNS:-cpu_w8 xpu_w8 xpu_ocl_w8 cpu_w32 cpu_heavy xpu_heavy}; do
+  # shellcheck disable=SC2086
+  ml "$name" ${RUNS[$name]}
+done
+
+# Keep this node's HDF5 videos, and analyse the login node's copies here
+# (GOLF_LOGIN_H5): tells data differences from numeric differences.
+mkdir -p "$RUN/h5" && (cd "$LOCAL" && find . -name "*.mp4.hdf5" -print0 |
+  cpio -0pdm --quiet "$RUN/h5")
+echo "kept $(find "$RUN/h5" -name '*.mp4.hdf5' | wc -l) HDF5 videos in $RUN/h5"
+if [ -n "${GOLF_LOGIN_H5:-}" ]; then
+  echo "== ml loginh5_cpu_w8: --source dir --root $GOLF_LOGIN_H5"
+  LD_LIBRARY_PATH=$PY_LD $PY "$GOLF/golf_video_ml.py" --source dir --root "$GOLF_LOGIN_H5" \
+    --out "$RUN/loginh5_cpu_w8" --device cpu --workers 8 --perms 100 \
+    > "$RUN/loginh5_cpu_w8.log" 2>&1
+  echo "rc=$?"
+  grep -E "embeddings on|AUC|timing" "$RUN/loginh5_cpu_w8.log" | grep -v '%'
+fi
+
+echo "== stop runtime  $(date)"
+LD_LIBRARY_PATH=$RT_LD clio_run stop > /dev/null 2>&1 || pkill -f "clio_run start"
