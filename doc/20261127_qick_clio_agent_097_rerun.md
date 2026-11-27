@@ -232,3 +232,6 @@ holds the answers. Beam searched `/`, `/tmp`, the scratch tree and the repo, and
 - `bench/qick/runs097/`: one directory per try (`ok_mistral-large-4/` and `ok_nemotron-35-super-vl/` added 2026-11-27), each with `out.json`, `meta.json`,
   `tool_calls.txt`, plots and `tmp_leftovers/`; the inputs are not committed
 - clio-agent: iowarp/clio-agent#2402, now 8 commits including 5624f32e3
+  On 2026-11-27 the PR was retargeted to upstream `develop` (rebased, 9 commits). The commit
+  hashes in this doc are the `main`-based ones the runs used, kept on the fork as branch
+  `backup/pr2402-on-main`.
