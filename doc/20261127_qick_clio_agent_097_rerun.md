@@ -23,7 +23,7 @@ not CLIO.
 | **muse-spark-bf16** | 0 (3/3 tries failed at step 1) | **5/6**, first try, 465 s, 20 tool calls, 1.02 M tokens |
 | **mistral-large-4** | 4.5, 611 s | **4/6**, first try, 346 s, 19 tool calls, 0.62 M tokens |
 | **nemotron-35-super-vl** | 3.5, 57 s | **3.5/6**, first try, 207 s, 11 tool calls, 3.18 M tokens |
-| **beam-1.0-fp8** | 6/6 on try 2 (try 1 failed at step 1) | **no valid answer in 5 tries**: 3 clean tries ended without a report (try 5 had the right F and a plot); 2 more tries excluded as contaminated |
+| **beam-1.0-fp8** | 6/6 on try 2 (try 1 failed at step 1) | **3/6 on try 6**, 721 s, 34 tool calls, 3.03 M tokens, after the harness changes below; tries 1–5 gave no valid answer (3 clean tries without a report, 2 excluded as contaminated) |
 
 Per-item scores (rubric of the 2026-11-21 doc):
 
@@ -32,10 +32,10 @@ Per-item scores (rubric of the 2026-11-21 doc):
 | muse-spark-bf16 | ✓ PARTIAL | ✓ | 91.82 | ✗ "stale threshold" | ✓ 4.76 | ✓ | **5** |
 | mistral-large-4 | ✓ YES | ✓ | 91.82 | ✗ "fixed calibration threshold" | ✗ 7.9 / 5.3 | ✓ | **4** |
 | nemotron-35-super-vl | ✓ YES | ✓ | 91.60 | ✗ "different, unspecified analysis" | ✗ 7.62 | ½ | **3.5** |
-| beam-1.0-fp8 | — | — | — | — | — | — | **0** |
+| beam-1.0-fp8 (try 6) | ✓ PARTIAL | ½ hedged | 91.82 | ✗ "calibration-style threshold" | ✗ 7.9 | ½ | **3** |
 
-**Total on the fixed clio-agent: 12.5 / 24**, against 14 / 24 on 0.9.4. Muse gained 5 and
-beam lost 6; mistral and nemotron scored about the same as before, but now finished on the
+**Total on the fixed clio-agent: 15.5 / 24** (beam's try 6 counted), against 14 / 24 on 0.9.4. Muse gained 5 and
+beam lost 3; mistral and nemotron scored about the same as before, but now finished on the
 first try. No model explained the stored 0.8365 as the contrast 2F−1 this time.
 
 ### muse-spark-bf16: answered on the first try (`runs097/ok_muse-spark-bf16/`)
@@ -92,7 +92,7 @@ On 2026-11-21 this would have been the second-best CLIO Agent answer, after beam
 - Fastest again (207 s, 11 calls), using `run_code` rather than shell scripts. The image cap of
   1 held: it viewed one image and got no 400.
 
-### beam-1.0-fp8: five tries, no valid answer
+### beam-1.0-fp8: an answer on try 6, after five without one
 
 | try | wall | calls | outcome | status |
 |---|---|---|---|---|
@@ -112,6 +112,23 @@ On 2026-11-21 this would have been the second-best CLIO Agent answer, after beam
 Every read of an answer was denied (`chmod 000`), sudo needs a password, and the `find /`
 calls timed out at the 120 s shell cap. The only file it could read was `prompt.txt`, its
 own prompt. On 2026-11-21 a beam run found `src/qick/ss_fidelity.py` the same way.
+
+**Try 6 answered (`runs097/ok_beam-1.0-fp8_try6/`, 3/6).** This was the first run on the changed
+harness (see below), with no earlier run in the run root and a Stop hook that also requires
+"VERDICT" in the final message.
+- **Turns:** turn 1 ended without `readout.png` and the hook re-drove it once. Turn 2 made the plot
+  and ended with the report.
+- **Clean:** its scripts went to its own session scratch in its agent home (copied to
+  `session_scratch/`). No `find /`, `chmod` or `sudo`.
+- **V:** ✓ PARTIAL.
+- **Q:** ½. It says the 91.7 % "is not attributable to a single labelled qubit", then names Q1 as
+  the closest match.
+- **F:** ✓ 91.82 % at threshold −155.8.
+- **S:** ✗. It found that the stored 0.8365 is exactly the accuracy at a threshold of −221.6, and
+  called that "a calibration-style threshold", not the contrast 2F−1.
+- **N:** ✗ 7.9.
+- **P:** ½. The scatter and histogram are right, but the core-fit curves are scaled about 1.6× above
+  the histogram.
 
 **Try 5 undid a lock.** After `find /` timed out, beam listed the run root, saw its own earlier
 try (`agent097_beam-1.0-fp8.old.*`, mode 000), and ran `chmod -R +rx` on it. As the owning user it
