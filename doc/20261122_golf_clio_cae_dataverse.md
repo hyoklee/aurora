@@ -219,7 +219,7 @@ CTE. None of the three ALCF models finished the analysis:
 * clio-core: `context-assimilation-engine/core/{include/clio_cae/core/factory/dataverse*.h, src/factory/dataverse_*.cc, src/factory/tools/dataverse_tool_main.cc}`, `test/unit/dataverse/`
 * `bench/golf/golf_omni.yaml`: the OMNI file. `clio_golf.yaml` is the runtime config (port 9513). `clio_env.sh.example` sets the environment.
 * `bench/golf/cte_golf.py`: reads tags back as numpy arrays and CSVs.
-* `bench/golf/golf_truth.py`: ground truth and timing (`--source cte|h5`). `results/` holds the ranking, timings and per-swing features (`swing_features_h5.csv`, regenerated 2026-11-27 with the facing-frame features; the data are the same as through CTE).
+* `bench/golf/golf_truth.py`: ground truth and timing (`--source cte|h5`). `results/` holds the ranking, timings and per-swing features. Since 2026-11-27, `ranking.csv` comes from `--source h5` and includes the facing-frame features. `swing_features_cte.csv` is the original CTE run, without them. Its 85 shared features give the same g to the last digit. Rerun `--source h5` (output git-ignored) or `--source cte` for the new per-swing columns.
 * `bench/golf/run_agent_golf.sh`, `prompt.txt`, `runs/`: the agent runs, cold staging log and clio-cae log.
 
 [1] MultiSenseGolf, Scientific Data (2026), https://doi.org/10.1038/s41597-026-08648-4 ; data: https://doi.org/10.7910/DVN/LCCLLW (CC0)
