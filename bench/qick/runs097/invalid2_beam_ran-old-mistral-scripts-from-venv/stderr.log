@@ -1,0 +1,6 @@
+WARNING | Using legacy Core supervision records; migrate paths after stopping CLIO
+WARNING | Using legacy Core supervision records; migrate paths after stopping CLIO
+WARNING | Using legacy Core supervision records; migrate paths after stopping CLIO
+clio: waiting for the CLIO server to finish starting...
+clio: started a CLIO server on port 17800 (model provider: argonne, beam-1.0-fp8).
+clio: nothing will be asked: every permission is granted (your deny rules still apply), plugins are trusted, tools take their defaults and questions are answered 'the user is not available'.

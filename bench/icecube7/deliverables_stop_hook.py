@@ -13,7 +13,8 @@ import json
 import os
 import sys
 
-DELIVERABLES = ("fig10.py", "fig10.png", "answer.md")
+# usage: deliverables_stop_hook.py <run dir> [file ...]; the IceCube-7 files by default.
+DELIVERABLES = tuple(sys.argv[2:]) or ("fig10.py", "fig10.png", "answer.md")
 
 try:
     envelope = json.load(sys.stdin)

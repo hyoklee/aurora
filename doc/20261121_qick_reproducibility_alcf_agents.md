@@ -1,5 +1,7 @@
 # Can a second team reproduce the QICK Box 91.7 % readout fidelity from the saved HDF5? — CLIO vs Genesis on the new ALCF models
 
+> **Update 2026-11-27:** CLIO Agent reruns of muse and beam on clio-agent 0.9.7.1 with fixes (iowarp/clio-agent#2402): muse answered on the first try (5/6); beam produced no valid answer in 4 tries (two were contaminated by earlier runs' scripts). See `doc/20261127_qick_clio_agent_097_rerun.md`.
+
 Date: 2026-11-21 · Host: Aurora login node `aurora-uan-0012` · Models: ALCF Inference Service, **Tara** cluster
 
 ## Question
