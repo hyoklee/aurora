@@ -1,0 +1,10 @@
+# Environment for the video ingest (golf_video_omni.yaml): a clio-core build with
+# -DCLIO_CAE_ENABLE_VIDEO=ON and the FFMPEG HDF5 filter plugin
+# (build_h5ffmpeg_plugin.sh). Set GOLF_SCRATCH, CLIO_VIDEO_BUILD and H5FFMPEG_PLUGIN_DIR.
+B=${CLIO_VIDEO_BUILD:?}/bin
+export LD_LIBRARY_PATH=$B:/opt/aurora/26.181.0/oneapi/compiler/latest/lib:/home/hyoklee/miniconda3/envs/iowarp/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export PATH=$B:$PATH
+export PYTHONPATH=$B
+export CLIO_SERVER_CONF=/home/hyoklee/aurora/bench/golf/clio_golf.yaml
+export CAE_DATAVERSE_CACHE=${GOLF_SCRATCH:?}/golf/dvcache
+export HDF5_PLUGIN_PATH=${H5FFMPEG_PLUGIN_DIR:?}

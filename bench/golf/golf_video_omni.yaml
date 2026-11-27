@@ -1,0 +1,51 @@
+# OMNI: ingest MultiSenseGolf swing videos (Harvard Dataverse doi:10.7910/DVN/LCCLLW)
+# into clio-core as HDF5. Run with
+#   clio-cae golf_video_omni.yaml
+# on a clio-core built with -DCLIO_CAE_ENABLE_VIDEO=ON, with HDF5_PLUGIN_PATH set
+# in the runtime's environment to the directory of libh5ffmpeg_shared.so
+# (the FFMPEG HDF5 filter, github.com/Cai-Lab-at-University-of-Michigan/ffmpeg_HDF5_filter).
+#
+# Selection: Swing01-Swing12 of the 8 Beginners (P01-P08) and the 8 Professionals
+# (P17-P24, whose first zip is P<id>_1.zip). Per swing:
+#   Front_View/RGB_Video.mp4  third-person camera, 640x480 @ 30 fps
+#   FPV_RGB.mp4               head-worn (Pupil Invisible) camera, 1088x1080 @ 20 fps
+# plus their frame-timestamp CSVs. The members are range-read out of the remote
+# zips; the depth PNG frames and all other swings are not downloaded.
+#
+# The video block transcodes each selected .mp4 to HDF5 before ingest:
+#   /frames  uint8 [T, H, W]  luma at width 320, x264 crf 23 via the FFMPEG
+#                              HDF5 filter (id 32030)
+#   /time_s  float64 [T]      frame times
+# The HDF5 file is stored whole as tag golfvideo/<zip>/<SwingNN>/<...>.mp4.hdf5
+# (its frames stay compressed); the CSVs become binary tags. Tag "golfvideo"
+# holds a manifest blob.
+transfers:
+  - src: "dataverse://dataverse.harvard.edu/doi:10.7910/DVN/LCCLLW"
+    dst: "iowarp::golfvideo"
+    format: "hdf5"
+    dataset_filter:
+      include_patterns:
+        - "P0[1-8].zip/Swing0[1-9]/FPV_*"
+        - "P0[1-8].zip/Swing1[0-2]/FPV_*"
+        - "P0[1-8].zip/Swing0[1-9]/Front_View/*.mp4"
+        - "P0[1-8].zip/Swing1[0-2]/Front_View/*.mp4"
+        - "P0[1-8].zip/Swing0[1-9]/Front_View/*.csv"
+        - "P0[1-8].zip/Swing1[0-2]/Front_View/*.csv"
+        - "P1[7-9]_1.zip/Swing0[1-9]/FPV_*"
+        - "P1[7-9]_1.zip/Swing1[0-2]/FPV_*"
+        - "P1[7-9]_1.zip/Swing0[1-9]/Front_View/*.mp4"
+        - "P1[7-9]_1.zip/Swing1[0-2]/Front_View/*.mp4"
+        - "P1[7-9]_1.zip/Swing0[1-9]/Front_View/*.csv"
+        - "P1[7-9]_1.zip/Swing1[0-2]/Front_View/*.csv"
+        - "P2[0-4]_1.zip/Swing0[1-9]/FPV_*"
+        - "P2[0-4]_1.zip/Swing1[0-2]/FPV_*"
+        - "P2[0-4]_1.zip/Swing0[1-9]/Front_View/*.mp4"
+        - "P2[0-4]_1.zip/Swing1[0-2]/Front_View/*.mp4"
+        - "P2[0-4]_1.zip/Swing0[1-9]/Front_View/*.csv"
+        - "P2[0-4]_1.zip/Swing1[0-2]/Front_View/*.csv"
+    video:
+      include: ["*.mp4"]
+      width: 320
+      codec: x264
+      crf: 23
+      preset: medium
