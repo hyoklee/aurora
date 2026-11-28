@@ -8,6 +8,8 @@
 #   FFMPEG_PREFIX  FFmpeg with headers and libx264 (default: conda env ffdev,
 #                  conda create -n ffdev -c conda-forge "ffmpeg=*=gpl*")
 #   HDF5_PREFIX    the HDF5 clio-core links (default: conda env iowarp)
+# -Bsymbolic: the filter exports generic names (encode, decode); without it a
+# library that also exports `encode` (Ubuntu's libcodec2) takes over its calls.
 # Then export HDF5_PLUGIN_PATH=<out dir>.
 set -euo pipefail
 src=${1:?ffmpeg_HDF5_filter checkout}
@@ -20,5 +22,5 @@ gcc -O2 -fPIC -shared -std=gnu11 -o "$out/libh5ffmpeg_shared.so" \
   "$src"/src/ffmpeg_native.c "$src"/src/ffmpeg_utils.c \
   -I"$F/include" -I"$H/include" -L"$F/lib" -L"$H/lib" \
   -lavcodec -lavformat -lavutil -lswscale -lswresample -lhdf5 \
-  -Wl,-rpath,"$F/lib" -Wl,-rpath,"$H/lib" -Wl,-rpath-link,"$F/lib" -Wl,--no-undefined
+  -Wl,-rpath,"$F/lib" -Wl,-rpath,"$H/lib" -Wl,-rpath-link,"$F/lib" -Wl,--no-undefined -Wl,-Bsymbolic
 echo "built $out/libh5ffmpeg_shared.so ($(git -C "$src" rev-parse --short HEAD 2>/dev/null || echo unknown))"
